@@ -3,12 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>急診月曆排班工具</title>
+    <title>急診月曆排班工具 - 修訂版</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <!-- 引入外部的排班規則引擎 -->
-    <script src="./scheduling_rules.js" defer></script>
 
     <style>
         body {
@@ -25,9 +23,13 @@
         .modal-hidden { display: none; opacity: 0; transition: opacity 0.3s ease; }
         .modal-visible { display: flex; opacity: 1; }
         
+        /* 修訂後的班次顏色 */
         .shift-color-day { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .shift-color-evening { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
         .shift-color-night { background: linear-gradient(135deg, #1f2937, #111827); color: white; }
-        .shift-color-off { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
+        .shift-color-weekend-day { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+        .shift-color-weekend-night { background: linear-gradient(135deg, #7c3aed, #5b21b6); color: white; }
+        .shift-color-off { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
 
         .calendar-container {
             background: white;
@@ -70,6 +72,16 @@
             color: #9ca3af !important;
         }
 
+        .holiday-cell {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            border: 2px solid #f59e0b;
+        }
+
+        .weekend-cell {
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+            border: 2px solid #0ea5e9;
+        }
+
         .date-number {
             font-weight: 600;
             display: flex;
@@ -86,11 +98,21 @@
             color: white;
         }
 
+        .holiday-number {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+        }
+
+        .weekend-number {
+            background: linear-gradient(135deg, #0ea5e9, #0284c7);
+            color: white;
+        }
+
         .shift-item {
             margin: 2px 0;
             padding: 3px 6px;
             border-radius: 6px;
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 500;
             text-align: center;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -159,7 +181,6 @@
             opacity: 1;
         }
 
-        /* 新增：員工可用性指示器 */
         .unavailable-indicator {
             position: absolute;
             top: 2px;
@@ -179,6 +200,40 @@
 
         .unavailable-cell {
             background-color: #fef3c7 !important;
+        }
+
+        .holiday-indicator {
+            position: absolute;
+            top: 2px;
+            right: 28px;
+            width: 16px;
+            height: 16px;
+            background: #f59e0b;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            z-index: 5;
+        }
+
+        .weekend-indicator {
+            position: absolute;
+            top: 2px;
+            right: 44px;
+            width: 16px;
+            height: 16px;
+            background: #0ea5e9;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            z-index: 5;
         }
 
         @keyframes pulse {
@@ -223,7 +278,6 @@
             border-radius: 4px;
         }
 
-        /* 新增：可用性日曆樣式 */
         .availability-calendar {
             display: grid;
             grid-template-columns: repeat(7, 1fr);
@@ -278,80 +332,214 @@
             background: rgba(255, 255, 255, 0.15);
             transform: translateY(-2px);
         }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            padding: 16px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .notification-success { background: #059669; }
+        .notification-error { background: #dc2626; }
+        .notification-warning { background: #d97706; }
+        .notification-info { background: #0ea5e9; }
     </style>
 </head>
 <body>
     <div class="container mx-auto p-4 sm:p-6 lg:p-8">
         <header class="text-center mb-8">
             <h1 class="text-4xl sm:text-5xl font-bold text-white mb-4">急診月曆排班工具</h1>
-            <p class="text-xl text-white opacity-90">智慧排班 - 含員工約班</p>
+            <p class="text-xl text-white opacity-90">週一至五三班制，週六日及假日兩班制</p>
         </header>
 
         <div class="grid grid-cols-1 xl:grid-cols-4 gap-8">
             <aside class="xl:col-span-1">
                 <div class="glass-effect rounded-2xl p-6 text-white">
                     <h2 class="text-2xl font-bold mb-6 text-center">控制面板</h2>
+                    
+                    <!-- 員工管理 -->
                     <div class="mb-8">
-                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i data-lucide="users" class="w-5 h-5"></i>員工管理</h3>
+                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="users" class="w-5 h-5"></i>員工管理
+                        </h3>
                         <div class="flex gap-2 mb-4">
-                            <input type="text" id="employeeNameInput" placeholder="輸入員工姓名" class="flex-grow px-3 py-2 text-gray-800 bg-white border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300">
-                            <button id="addEmployeeBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-all flex items-center gap-1"><i data-lucide="user-plus" class="w-4 h-4"></i></button>
+                            <input type="text" id="employeeNameInput" placeholder="輸入員工姓名" 
+                                   class="flex-grow px-3 py-2 text-gray-800 bg-white border border-white/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <button id="addEmployeeBtn" 
+                                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-all flex items-center gap-1">
+                                <i data-lucide="user-plus" class="w-4 h-4"></i>
+                            </button>
                         </div>
                         <div id="employeeList" class="space-y-2 max-h-40 overflow-y-auto"></div>
                     </div>
+
+                    <!-- 假日班設定 -->
                     <div class="mb-8">
-                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i data-lucide="zap" class="w-5 h-5"></i>快速操作</h3>
+                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-5 h-5"></i>假日班設定
+                        </h3>
+                        <button id="openHolidayModalBtn" 
+                                class="w-full bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                            <i data-lucide="sun" class="w-4 h-4"></i>設定假日班
+                        </button>
+                    </div>
+
+                    <!-- 快速操作 -->
+                    <div class="mb-8">
+                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="zap" class="w-5 h-5"></i>快速操作
+                        </h3>
                         <div class="space-y-3">
-                            <button id="openAvailabilityModalBtn" class="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="calendar-check" class="w-4 h-4"></i>員工約班</button>
-                            <button id="openConditionsModalBtn" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="settings" class="w-4 h-4"></i>排班條件</button>
-                            <button id="autoScheduleBtn" class="w-full bg-violet-500 hover:bg-violet-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="wand-2" class="w-4 h-4"></i>自動排班</button>
-                            <button id="validateScheduleBtn" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="shield-check" class="w-4 h-4"></i>檢查衝突</button>
-                            <button id="generateReportBtn" class="w-full bg-purple-500 hover:bg-purple-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="file-text" class="w-4 h-4"></i>統計報表</button>
+                            <button id="openAvailabilityModalBtn" 
+                                    class="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="calendar-check" class="w-4 h-4"></i>員工約班
+                            </button>
+                            <button id="openConditionsModalBtn" 
+                                    class="w-full bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="settings" class="w-4 h-4"></i>排班條件
+                            </button>
+                            <button id="autoScheduleBtn" 
+                                    class="w-full bg-violet-500 hover:bg-violet-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="wand-2" class="w-4 h-4"></i>自動排班
+                            </button>
+                            <button id="validateScheduleBtn" 
+                                    class="w-full bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="shield-check" class="w-4 h-4"></i>檢查衝突
+                            </button>
+                            <button id="generateReportBtn" 
+                                    class="w-full bg-purple-500 hover:bg-purple-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="file-text" class="w-4 h-4"></i>統計報表
+                            </button>
                         </div>
                     </div>
+
+                    <!-- 資料管理 -->
                     <div>
-                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i data-lucide="database" class="w-5 h-5"></i>資料管理</h3>
+                        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="database" class="w-5 h-5"></i>資料管理
+                        </h3>
                         <div class="space-y-3">
-                            <button id="exportDataBtn" class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2"><i data-lucide="download" class="w-4 h-4"></i>匯出資料</button>
-                            <label for="importDataInput" class="w-full bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2"><i data-lucide="upload" class="w-4 h-4"></i>匯入資料</label>
+                            <button id="exportDataBtn" 
+                                    class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2">
+                                <i data-lucide="download" class="w-4 h-4"></i>匯出資料
+                            </button>
+                            <label for="importDataInput" 
+                                   class="w-full bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-2">
+                                <i data-lucide="upload" class="w-4 h-4"></i>匯入資料
+                            </label>
                             <input type="file" id="importDataInput" class="hidden" accept=".json">
                         </div>
                     </div>
                 </div>
             </aside>
 
+            <!-- 主日曆 -->
             <main class="xl:col-span-3">
                 <div class="calendar-container">
                     <div class="calendar-header">
                         <div class="flex items-center justify-between mb-4">
-                            <button id="prevMonthBtn" class="p-2 rounded-full hover:bg-white/20 transition-all"><i data-lucide="chevron-left" class="w-6 h-6"></i></button>
+                            <button id="prevMonthBtn" class="p-2 rounded-full hover:bg-white/20 transition-all">
+                                <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                            </button>
                             <div class="flex gap-4">
                                 <select id="yearSelect" class="bg-white/20 text-white border border-white/30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white/50"></select>
                                 <select id="monthSelect" class="bg-white/20 text-white border border-white/30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white/50"></select>
                             </div>
-                            <button id="nextMonthBtn" class="p-2 rounded-full hover:bg-white/20 transition-all"><i data-lucide="chevron-right" class="w-6 h-6"></i></button>
+                            <button id="nextMonthBtn" class="p-2 rounded-full hover:bg-white/20 transition-all">
+                                <i data-lucide="chevron-right" class="w-6 h-6"></i>
+                            </button>
                         </div>
                         <div id="monthlyStats" class="text-center text-white/90"></div>
                     </div>
+                    
+                    <!-- 星期標題 -->
                     <div class="grid grid-cols-7">
-                        <div class="weekday-header">日</div><div class="weekday-header">一</div><div class="weekday-header">二</div><div class="weekday-header">三</div><div class="weekday-header">四</div><div class="weekday-header">五</div><div class="weekday-header">六</div>
+                        <div class="weekday-header">日</div>
+                        <div class="weekday-header">一</div>
+                        <div class="weekday-header">二</div>
+                        <div class="weekday-header">三</div>
+                        <div class="weekday-header">四</div>
+                        <div class="weekday-header">五</div>
+                        <div class="weekday-header">六</div>
                     </div>
+                    
+                    <!-- 日期格子 -->
                     <div id="calendarDateGrid" class="grid grid-cols-7"></div>
+                    
+                    <!-- 圖例 -->
                     <div class="legend">
-                        <div class="legend-item"><div class="legend-color shift-color-day"></div><span>白班 (7:30-19:30)</span></div>
-                        <div class="legend-item"><div class="legend-color shift-color-night"></div><span>夜班 (19:30-7:30)</span></div>
+                        <div class="legend-item"><div class="legend-color shift-color-day"></div><span>平日白班 (7:00-15:00)</span></div>
+                        <div class="legend-item"><div class="legend-color shift-color-evening"></div><span>平日小夜 (15:00-23:00)</span></div>
+                        <div class="legend-item"><div class="legend-color shift-color-night"></div><span>平日大夜 (23:00-7:00)</span></div>
+                        <div class="legend-item"><div class="legend-color shift-color-weekend-day"></div><span>週末/假日白班 (7:00-19:00)</span></div>
+                        <div class="legend-item"><div class="legend-color shift-color-weekend-night"></div><span>週末/假日夜班 (19:00-7:00)</span></div>
                         <div class="legend-item"><div class="legend-color shift-color-off"></div><span>休假</span></div>
                         <div class="legend-item"><div class="w-4 h-4 bg-amber-200 rounded border-2 border-amber-400"></div><span>有員工不可用</span></div>
+                        <div class="legend-item"><div class="w-4 h-4 bg-yellow-300 rounded border-2 border-yellow-500"></div><span>假日班</span></div>
+                        <div class="legend-item"><div class="w-4 h-4 bg-blue-200 rounded border-2 border-blue-400"></div><span>週末</span></div>
                     </div>
                 </div>
             </main>
         </div>
     </div>
 
+    <!-- 假日班設定 Modal -->
+    <div id="holidayModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
+            <button id="closeHolidayModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors">
+                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+            </button>
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4 flex items-center gap-2">
+                <i data-lucide="sun" class="w-6 h-6 text-yellow-500"></i>假日班設定
+            </h3>
+            
+            <div class="flex gap-6 mb-6">
+                <div class="flex-shrink-0">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">選擇月份</label>
+                    <div class="flex gap-2">
+                        <select id="holidayYearSelect" class="w-24 p-3 border rounded-lg"></select>
+                        <select id="holidayMonthSelect" class="w-24 p-3 border rounded-lg"></select>
+                    </div>
+                </div>
+                <div class="flex items-end gap-2">
+                    <button id="clearHolidaysBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-3 rounded-lg transition-colors">清空假日</button>
+                    <button id="setWeekendsHolidayBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-3 rounded-lg transition-colors">設定周末為假日</button>
+                </div>
+            </div>
+
+            <div class="flex-grow overflow-y-auto">
+                <div id="holidayCalendarContainer" class="mb-6">
+                    <p class="text-gray-500 text-center py-8">請先選擇月份</p>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h4 class="font-semibold mb-2 text-gray-700">假日班說明</h4>
+                    <ul class="text-sm text-gray-600 space-y-1">
+                        <li>• 點擊日期可切換假日狀態</li>
+                        <li>• <span class="text-yellow-600 font-semibold">黃色</span>：假日班（兩班制：白班7:00-19:00，夜班19:00-7:00）</li>
+                        <li>• <span class="text-blue-600 font-semibold">藍色</span>：週末（自動兩班制：白班7:00-19:00，夜班19:00-7:00）</li>
+                        <li>• <span class="text-gray-500 font-semibold">灰色</span>：平日班（三班制：白班7:00-15:00，小夜15:00-23:00，大夜23:00-7:00）</li>
+                        <li>• 假日班設定會影響可選擇的班次類型</li>
+                        <li>• 排班時系統會根據假日設定自動調整班次選項</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 員工可用性設定 Modal -->
     <div id="availabilityModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl p-6 relative flex flex-col max-h-[90vh]">
-            <button id="closeAvailabilityModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
+            <button id="closeAvailabilityModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors">
+                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+            </button>
             <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4 flex items-center gap-2">
                 <i data-lucide="calendar-check" class="w-6 h-6 text-orange-500"></i>員工約班設定
             </h3>
@@ -396,85 +584,232 @@
         </div>
     </div>
 
-    <!-- 原有的其他 Modals -->
-    <div id="shiftModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
-            <button id="closeShiftModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
-            <h3 id="shiftModalTitle" class="text-2xl font-bold text-gray-800 mb-6"></h3>
-            <form id="shiftForm">
-                <input type="hidden" id="selectedDateInput"><input type="hidden" id="editingShiftIndex">
-                <div class="mb-6"><label for="modalEmployeeSelect" class="block text-sm font-medium text-gray-700 mb-2">選擇員工</label><select id="modalEmployeeSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required></select></div>
-                <div class="mb-8"><label for="modalShiftTypeSelect" class="block text-sm font-medium text-gray-700 mb-2">選擇班別</label><select id="modalShiftTypeSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"><option value="day">白班 (7:30-19:30)</option><option value="night">夜班 (19:30-7:30)</option><option value="off">休假</option></select></div>
-                <div class="flex justify-end gap-3"><button type="button" id="deleteShiftBtn" class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg transition-colors hidden">刪除</button><button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors">儲存</button></div>
-            </form>
-        </div>
-    </div>
+    <!-- 排班條件設定 Modal -->
     <div id="conditionsModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl p-6 relative flex flex-col max-h-[90vh]">
-            <button id="closeConditionsModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
-            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4">設定排班條件</h3>
+            <button id="closeConditionsModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors">
+                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+            </button>
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4 flex items-center gap-2">
+                <i data-lucide="settings" class="w-6 h-6 text-indigo-500"></i>設定排班條件
+            </h3>
+            
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-6">
+                <!-- 員工規則設定 -->
                 <form id="employeeRuleForm" class="bg-gray-50 p-6 rounded-xl">
-                    <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2"><i data-lucide="user" class="w-4 h-4"></i>員工規則</h4>
+                    <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                        <i data-lucide="user" class="w-4 h-4"></i>員工規則
+                    </h4>
                     <div class="space-y-4">
-                        <select id="ruleEmployeeSelect" class="w-full p-3 border rounded-lg" required></select>
+                        <select id="ruleEmployeeSelect" class="w-full p-3 border rounded-lg" required>
+                            <option value="">請選擇員工</option>
+                        </select>
                         <select id="employeeRuleType" class="w-full p-3 border rounded-lg">
                             <option value="maxConsecutiveWorkDays">最多連續工作天數</option>
                             <option value="no24HourShift">禁止夜班後隔天接白班</option>
+                            <option value="noDirectShiftTransition">禁止班次直接銜接</option>
                             <option value="balanceShifts">白班夜班數量平衡</option>
+                            <option value="preferredShift">偏好班次設定</option>
+                            <option value="maxWeeklyShifts">每週最大班次數</option>
                         </select>
                         <input type="number" id="employeeRuleValue" min="1" max="30" value="5" class="w-full p-3 border rounded-lg" required>
+                        <div class="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
+                            <p id="ruleDescription">請選擇規則類型查看說明</p>
+                        </div>
                         <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg transition-colors">新增規則</button>
                     </div>
                 </form>
+
+                <!-- 班別規則設定 -->
                 <form id="shiftRuleForm" class="bg-gray-50 p-6 rounded-xl">
-                    <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4"></i>班別規則</h4>
+                    <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                        <i data-lucide="clock" class="w-4 h-4"></i>班別規則
+                    </h4>
                     <div class="space-y-4">
-                        <select id="shiftRuleType" class="w-full p-3 border rounded-lg"><option value="day">白班 (7:30-19:30)</option><option value="night">夜班 (19:30-7:30)</option></select>
-                        <select id="shiftRuleCondition" class="w-full p-3 border rounded-lg"><option value="minStaff">每日最少人數</option></select>
-                        <input type="number" id="shiftRuleValue" min="1" max="50" value="1" class="w-full p-3 border rounded-lg" required>
-                        <button type="submit" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-3 rounded-lg transition-colors">新增規則</button>
+                        <select id="shiftRuleType" class="w-full p-3 border rounded-lg">
+                            <option value="day">平日白班 (7:00-15:00)</option>
+                            <option value="evening">平日小夜 (15:00-23:00)</option>
+                            <option value="night">平日大夜 (23:00-7:00)</option>
+                            <option value="weekend-day">週末/假日白班 (7:00-19:00)</option>
+                            <option value="weekend-night">週末/假日夜班 (19:00-7:00)</option>
+                        </select>
+                        <select id="shiftRuleCondition" class="w-full p-3 border rounded-lg">
+                            <option value="minStaff">每日最少人數</option>
+                            <option value="maxStaff">每日最多人數</option>
+                            <option value="preferredStaff">建議人數</option>
+                        </select>
+                        <input type="number" id="shiftRuleValue" min="0" max="50" value="1" class="w-full p-3 border rounded-lg" required>
+                        <div class="text-sm text-gray-600 bg-green-50 p-3 rounded-lg">
+                            <p>設定該班別的人力需求限制，系統排班時會遵循這些規則</p>
+                        </div>
+                        <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-lg transition-colors">新增規則</button>
                     </div>
                 </form>
             </div>
-            <div class="flex-grow overflow-y-auto"><h4 class="font-semibold mb-4 text-gray-700">目前規則列表</h4><div id="rulesList" class="space-y-3"></div></div>
+
+            <!-- 規則列表 -->
+            <div class="flex-grow overflow-y-auto">
+                <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                    <i data-lucide="list" class="w-4 h-4"></i>目前規則列表
+                </h4>
+                <div id="rulesList" class="space-y-3">
+                    <p class="text-gray-500 text-center py-8">尚未設定任何規則</p>
+                </div>
+            </div>
+
+            <!-- 預設規則快速設定 -->
+            <div class="mt-6 pt-4 border-t">
+                <h4 class="font-semibold mb-3 text-gray-700">快速設定預設規則</h4>
+                <div class="flex flex-wrap gap-2">
+                    <button id="setBasicRulesBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        基本安全規則
+                    </button>
+                    <button id="setBalancedRulesBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        平衡排班規則
+                    </button>
+                    <button id="clearAllRulesBtn" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        清空所有規則
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- 排班 Modal -->
+    <div id="shiftModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
+            <button id="closeShiftModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors">
+                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+            </button>
+            <h3 id="shiftModalTitle" class="text-2xl font-bold text-gray-800 mb-6"></h3>
+            <form id="shiftForm">
+                <input type="hidden" id="selectedDateInput">
+                <input type="hidden" id="editingShiftIndex">
+                
+                <div class="mb-6">
+                    <label for="modalEmployeeSelect" class="block text-sm font-medium text-gray-700 mb-2">選擇員工</label>
+                    <select id="modalEmployeeSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required></select>
+                </div>
+                
+                <div class="mb-8">
+                    <label for="modalShiftTypeSelect" class="block text-sm font-medium text-gray-700 mb-2">選擇班別</label>
+                    <select id="modalShiftTypeSelect" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                </div>
+                
+                <div class="flex justify-end gap-3">
+                    <button type="button" id="deleteShiftBtn" class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg transition-colors hidden">刪除</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors">儲存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 自動排班 Modal -->
     <div id="autoScheduleModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] p-6 relative flex flex-col">
-            <button id="closeAutoScheduleModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors z-10"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
-            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4 flex items-center gap-2"><i data-lucide="wand-2" class="w-6 h-6 text-violet-500"></i>自動排班設定</h3>
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] p-6 relative flex flex-col">
+            <button id="closeAutoScheduleModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors z-10">
+                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+            </button>
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4 flex items-center gap-2">
+                <i data-lucide="wand-2" class="w-6 h-6 text-violet-500"></i>自動排班設定
+            </h3>
             
             <div class="flex-1 overflow-y-auto pr-2">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div class="bg-gradient-to-br from-blue-50 to-indigo-100 p-6 rounded-xl"><h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4"></i>基本設定</h4><div class="space-y-4"><div><label class="block text-sm font-medium text-gray-600 mb-1">排班範圍</label><select id="autoScheduleRange" class="w-full p-3 border rounded-lg"><option value="currentMonth">本月</option><option value="nextMonth">下個月</option><option value="both">本月+下個月</option></select></div><div><label class="block text-sm font-medium text-gray-600 mb-1">排班策略</label><select id="autoScheduleStrategy" class="w-full p-3 border rounded-lg"><option value="balanced">平衡分配</option><option value="minimize_night">減少夜班</option><option value="rotate">輪班制</option></select></div></div></div>
-                    <div class="bg-gradient-to-br from-green-50 to-emerald-100 p-6 rounded-xl"><h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2"><i data-lucide="users" class="w-4 h-4"></i>人力需求</h4><div class="space-y-4"><div><label class="block text-sm font-medium text-gray-600 mb-1">白班人數</label><input type="number" id="dayShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg"></div><div><label class="block text-sm font-medium text-gray-600 mb-1">夜班人數</label><input type="number" id="nightShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg"></div><div><label class="block text-sm font-medium text-gray-600 mb-1">最大連續工作天</label><input type="number" id="maxConsecutiveDays" min="1" max="14" value="5" class="w-full p-3 border rounded-lg"></div><div class="bg-white p-3 rounded-lg border-l-4 border-blue-400"><p class="text-sm text-gray-600"><strong>提示：</strong>設定白班或夜班人數為 0 可跳過該班次。系統會優先確保每天至少有一人上班。</p></div></div></div>
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-100 p-6 rounded-xl">
+                        <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-4 h-4"></i>基本設定
+                        </h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">排班範圍</label>
+                                <select id="autoScheduleRange" class="w-full p-3 border rounded-lg">
+                                    <option value="currentMonth">本月</option>
+                                    <option value="nextMonth">下個月</option>
+                                    <option value="both">本月+下個月</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">排班策略</label>
+                                <select id="autoScheduleStrategy" class="w-full p-3 border rounded-lg">
+                                    <option value="balanced">平衡分配</option>
+                                    <option value="minimize_night">減少夜班</option>
+                                    <option value="rotate">輪班制</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-100 p-6 rounded-xl">
+                        <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                            <i data-lucide="users" class="w-4 h-4"></i>平日人力需求
+                        </h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">白班人數 (7:00-15:00)</label>
+                                <input type="number" id="dayShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">小夜人數 (15:00-23:00)</label>
+                                <input type="number" id="eveningShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">大夜人數 (23:00-7:00)</label>
+                                <input type="number" id="nightShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg">
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="mb-6"><h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2"><i data-lucide="info" class="w-4 h-4"></i>排班說明</h4><div class="bg-gray-50 p-4 rounded-lg text-sm text-gray-600"><ul class="space-y-2"><li>• <strong>平衡分配</strong>：盡量讓每位員工的白班/夜班數量平均</li><li>• <strong>減少夜班</strong>：優先安排白班，減少夜班數量</li><li>• <strong>輪班制</strong>：按順序輪流安排，確保公平性</li><li>• <strong>每天保證有人</strong>：系統會確保每天至少安排一人上班</li><li>• <strong>嚴格人數控制</strong>：每個班次精確安排指定人數</li><li>• 系統會自動避免連續24小時班次</li><li>• 會考慮員工可用性設定，不會在不可用日期安排班次</li><li>• 現有排班不會被覆蓋，只填入空白日期</li></ul></div></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-100 p-6 rounded-xl">
+                        <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                            <i data-lucide="sun" class="w-4 h-4"></i>週末/假日人力需求
+                        </h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">白班 (7:00-19:00)</label>
+                                <input type="number" id="weekendDayShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">夜班 (19:00-7:00)</label>
+                                <input type="number" id="weekendNightShiftStaff" min="0" max="10" value="1" class="w-full p-3 border rounded-lg">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-gradient-to-br from-orange-50 to-red-100 p-6 rounded-xl">
+                        <h4 class="font-semibold mb-4 text-gray-700 flex items-center gap-2">
+                            <i data-lucide="shield" class="w-4 h-4"></i>限制條件
+                        </h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-600 mb-1">最大連續工作天</label>
+                                <input type="number" id="maxConsecutiveDays" min="1" max="14" value="5" class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div class="bg-white p-3 rounded-lg border-l-4 border-orange-400">
+                                <p class="text-sm text-gray-600"><strong>班次間隔：</strong>平日班次間需間隔至少兩個班次（如白班後不會直接安排小夜）</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
-            <div class="flex justify-end gap-3 pt-4 border-t bg-white sticky bottom-0"><button id="clearMonthBtn" class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg transition-colors flex items-center gap-2"><i data-lucide="trash-2" class="w-4 h-4"></i>清空本月</button><button id="startAutoScheduleBtn" class="bg-violet-500 hover:bg-violet-600 text-white px-6 py-3 rounded-lg transition-colors flex items-center gap-2"><i data-lucide="play" class="w-4 h-4"></i>開始排班</button></div>
-        </div>
-    </div>
-    <div id="reportModal" class="modal-hidden fixed inset-0 bg-black/50 backdrop-blur-sm items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl p-6 relative flex flex-col max-h-[90vh]">
-            <button id="closeReportModalBtn" class="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></button>
-            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-4">排班統計報表</h3>
-            <div id="reportContent" class="flex-grow overflow-y-auto"></div>
-            <div class="flex justify-end gap-3 mt-6 pt-4 border-t"><button id="exportReportBtn" class="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition-colors">匯出報表</button></div>
+            <div class="flex justify-end gap-3 pt-4 border-t bg-white sticky bottom-0">
+                <button id="clearMonthBtn" class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-lg transition-colors flex items-center gap-2">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>清空本月
+                </button>
+                <button id="startAutoScheduleBtn" class="bg-violet-500 hover:bg-violet-600 text-white px-6 py-3 rounded-lg transition-colors flex items-center gap-2">
+                    <i data-lucide="play" class="w-4 h-4"></i>開始排班
+                </button>
+            </div>
         </div>
     </div>
 
+    <script src="./scheduling_rules.js"></script>
     <script>
-        const waitForLucide = () => {
-            if (typeof lucide !== 'undefined' && typeof RuleEngine !== 'undefined') {
-                initializeApp();
-            } else {
-                setTimeout(waitForLucide, 100);
-            }
-        };
-
+        // 應用初始化
         const initializeApp = () => {
+            console.log('開始初始化修訂版排班系統...');
+            
+            // 獲取所有DOM元素
             const calendarDateGrid = document.getElementById('calendarDateGrid');
             const yearSelect = document.getElementById('yearSelect');
             const monthSelect = document.getElementById('monthSelect');
@@ -486,6 +821,8 @@
             const employeeList = document.getElementById('employeeList');
             const exportDataBtn = document.getElementById('exportDataBtn');
             const importDataInput = document.getElementById('importDataInput');
+            
+            // Modal 相關元素
             const shiftModal = document.getElementById('shiftModal');
             const closeShiftModalBtn = document.getElementById('closeShiftModalBtn');
             const shiftModalTitle = document.getElementById('shiftModalTitle');
@@ -495,6 +832,7 @@
             const modalEmployeeSelect = document.getElementById('modalEmployeeSelect');
             const modalShiftTypeSelect = document.getElementById('modalShiftTypeSelect');
             const deleteShiftBtn = document.getElementById('deleteShiftBtn');
+            
             const conditionsModal = document.getElementById('conditionsModal');
             const openConditionsModalBtn = document.getElementById('openConditionsModalBtn');
             const closeConditionsModalBtn = document.getElementById('closeConditionsModalBtn');
@@ -502,19 +840,24 @@
             const shiftRuleForm = document.getElementById('shiftRuleForm');
             const rulesList = document.getElementById('rulesList');
             const ruleEmployeeSelect = document.getElementById('ruleEmployeeSelect');
-            const reportModal = document.getElementById('reportModal');
-            const generateReportBtn = document.getElementById('generateReportBtn');
-            const closeReportModalBtn = document.getElementById('closeReportModalBtn');
-            const reportContent = document.getElementById('reportContent');
-            const exportReportBtn = document.getElementById('exportReportBtn');
+            const employeeRuleType = document.getElementById('employeeRuleType');
+            const employeeRuleValue = document.getElementById('employeeRuleValue');
+            const shiftRuleType = document.getElementById('shiftRuleType');
+            const shiftRuleCondition = document.getElementById('shiftRuleCondition');
+            const shiftRuleValue = document.getElementById('shiftRuleValue');
+            const setBasicRulesBtn = document.getElementById('setBasicRulesBtn');
+            const setBalancedRulesBtn = document.getElementById('setBalancedRulesBtn');
+            const clearAllRulesBtn = document.getElementById('clearAllRulesBtn');
+            
             const autoScheduleModal = document.getElementById('autoScheduleModal');
             const autoScheduleBtn = document.getElementById('autoScheduleBtn');
             const closeAutoScheduleModalBtn = document.getElementById('closeAutoScheduleModalBtn');
             const startAutoScheduleBtn = document.getElementById('startAutoScheduleBtn');
             const clearMonthBtn = document.getElementById('clearMonthBtn');
             const validateScheduleBtn = document.getElementById('validateScheduleBtn');
+            const generateReportBtn = document.getElementById('generateReportBtn');
 
-            // 新增：員工可用性相關元素
+            // 員工可用性相關元素
             const availabilityModal = document.getElementById('availabilityModal');
             const openAvailabilityModalBtn = document.getElementById('openAvailabilityModalBtn');
             const closeAvailabilityModalBtn = document.getElementById('closeAvailabilityModalBtn');
@@ -526,56 +869,57 @@
             const setAllAvailableBtn = document.getElementById('setAllAvailableBtn');
             const setAllUnavailableBtn = document.getElementById('setAllUnavailableBtn');
 
+            // 假日班相關元素
+            const holidayModal = document.getElementById('holidayModal');
+            const openHolidayModalBtn = document.getElementById('openHolidayModalBtn');
+            const closeHolidayModalBtn = document.getElementById('closeHolidayModalBtn');
+            const holidayYearSelect = document.getElementById('holidayYearSelect');
+            const holidayMonthSelect = document.getElementById('holidayMonthSelect');
+            const holidayCalendarContainer = document.getElementById('holidayCalendarContainer');
+            const clearHolidaysBtn = document.getElementById('clearHolidaysBtn');
+            const setWeekendsHolidayBtn = document.getElementById('setWeekendsHolidayBtn');
+
+            // 全域變數
             let currentDate = new Date();
             let employees = [];
             let scheduleData = {};
+            let employeeAvailability = {};
+            let holidayDates = {};
             let schedulingConditions = { employeeRules: [], shiftRules: [] };
-            let employeeAvailability = {}; // 新增：員工可用性資料
             
+            // 更新班次類型定義 - 修訂版時間
             const shiftTypes = {
-                day: '白班 (7:30-19:30)',
-                night: '夜班 (19:30-7:30)',
+                // 平日三班制 (週一至週五)
+                day: '平日白班 (7:00-15:00)',
+                evening: '平日小夜 (15:00-23:00)', 
+                night: '平日大夜 (23:00-7:00)',
+                // 週末及假日兩班制 (週六、週日及假日)
+                'weekend-day': '週末/假日白班 (7:00-19:00)',
+                'weekend-night': '週末/假日夜班 (19:00-7:00)',
+                // 休假
                 off: '休假'
             };
 
-            const loadData = () => {
-                try {
-                    const storedEmployees = localStorage.getItem('scheduler_employees');
-                    if (storedEmployees) employees = JSON.parse(storedEmployees);
-                    const storedSchedule = localStorage.getItem('scheduler_data');
-                    if (storedSchedule) scheduleData = JSON.parse(storedSchedule);
-                    const storedConditions = localStorage.getItem('scheduler_conditions');
-                    if (storedConditions) {
-                        const parsedConditions = JSON.parse(storedConditions);
-                        if (parsedConditions && parsedConditions.employeeRules && parsedConditions.shiftRules) {
-                            schedulingConditions = parsedConditions;
-                        }
+            // 錯誤處理和通知系統
+            const showNotification = (message, type = 'info', duration = 5000) => {
+                const notification = document.createElement('div');
+                notification.className = `notification notification-${type}`;
+                notification.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span>${message}</span>
+                        <button onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer;">&times;</button>
+                    </div>
+                `;
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
                     }
-                    // 新增：載入員工可用性資料
-                    const storedAvailability = localStorage.getItem('scheduler_availability');
-                    if (storedAvailability) {
-                        employeeAvailability = JSON.parse(storedAvailability);
-                    }
-                } catch (error) {
-                    console.error('從 localStorage 載入資料失敗，將使用預設值:', error);
-                    employees = [];
-                    scheduleData = {};
-                    schedulingConditions = { employeeRules: [], shiftRules: [] };
-                    employeeAvailability = {};
-                }
-            };
-            
-            const saveData = () => {
-                try {
-                    localStorage.setItem('scheduler_employees', JSON.stringify(employees));
-                    localStorage.setItem('scheduler_data', JSON.stringify(scheduleData));
-                    localStorage.setItem('scheduler_conditions', JSON.stringify(schedulingConditions));
-                    localStorage.setItem('scheduler_availability', JSON.stringify(employeeAvailability)); // 新增
-                } catch (error) {
-                    console.error('儲存資料到 localStorage 失敗:', error);
-                }
+                }, duration);
             };
 
+            // 輔助函數
             const formatDate = (date) => {
                 const year = date.getFullYear();
                 const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -585,16 +929,235 @@
 
             const isToday = (date) => formatDate(date) === formatDate(new Date());
 
-            // 新增：檢查某日是否有員工不可用
+            const isHoliday = (dateStr) => {
+                return holidayDates[dateStr] === true;
+            };
+
+            const isWeekend = (dateStr) => {
+                const date = new Date(dateStr);
+                const dayOfWeek = date.getDay();
+                return dayOfWeek === 0 || dayOfWeek === 6; // 0=星期日, 6=星期六
+            };
+
+            const isWeekendOrHoliday = (dateStr) => {
+                return isWeekend(dateStr) || isHoliday(dateStr);
+            };
+
             const hasUnavailableEmployees = (dateStr) => {
                 return Object.values(employeeAvailability).some(availability => 
                     availability[dateStr] === false
                 );
             };
 
+            const getAvailableShiftTypes = (dateStr) => {
+                if (isWeekendOrHoliday(dateStr)) {
+                    return {
+                        'weekend-day': shiftTypes['weekend-day'],
+                        'weekend-night': shiftTypes['weekend-night'],
+                        'off': shiftTypes['off']
+                    };
+                } else {
+                    return {
+                        'day': shiftTypes['day'],
+                        'evening': shiftTypes['evening'],
+                        'night': shiftTypes['night'],
+                        'off': shiftTypes['off']
+                    };
+                }
+            };
+
+            // 資料管理函數
+            const loadData = () => {
+                try {
+                    const storedEmployees = localStorage.getItem('scheduler_employees_v2');
+                    if (storedEmployees) employees = JSON.parse(storedEmployees);
+                    
+                    const storedSchedule = localStorage.getItem('scheduler_data_v2');
+                    if (storedSchedule) scheduleData = JSON.parse(storedSchedule);
+                    
+                    const storedAvailability = localStorage.getItem('scheduler_availability_v2');
+                    if (storedAvailability) {
+                        employeeAvailability = JSON.parse(storedAvailability);
+                    }
+                    
+                    const storedHolidays = localStorage.getItem('scheduler_holidays_v2');
+                    if (storedHolidays) {
+                        holidayDates = JSON.parse(storedHolidays);
+                    }
+                    
+                    const storedConditions = localStorage.getItem('scheduler_conditions_v2');
+                    if (storedConditions) {
+                        const parsedConditions = JSON.parse(storedConditions);
+                        if (parsedConditions && parsedConditions.employeeRules && parsedConditions.shiftRules) {
+                            schedulingConditions = parsedConditions;
+                        }
+                    }
+                    
+                    console.log('資料載入成功');
+                } catch (error) {
+                    console.error('從 localStorage 載入資料失敗，將使用預設值:', error);
+                    showNotification('載入資料失敗，使用預設設定', 'warning');
+                    employees = [];
+                    scheduleData = {};
+                    employeeAvailability = {};
+                    holidayDates = {};
+                    schedulingConditions = { employeeRules: [], shiftRules: [] };
+                }
+            };
+            
+            const saveData = () => {
+                try {
+                    localStorage.setItem('scheduler_employees_v2', JSON.stringify(employees));
+                    localStorage.setItem('scheduler_data_v2', JSON.stringify(scheduleData));
+                    localStorage.setItem('scheduler_availability_v2', JSON.stringify(employeeAvailability));
+                    localStorage.setItem('scheduler_holidays_v2', JSON.stringify(holidayDates));
+                    localStorage.setItem('scheduler_conditions_v2', JSON.stringify(schedulingConditions));
+                    console.log('資料儲存成功');
+                } catch (error) {
+                    console.error('儲存資料到 localStorage 失敗:', error);
+                    showNotification('儲存資料失敗', 'error');
+                }
+            };
+
+            // Modal 控制函數
+            const openModal = (modalEl) => { 
+                modalEl.classList.remove('modal-hidden'); 
+                modalEl.classList.add('modal-visible'); 
+                document.body.style.overflow = 'hidden'; 
+            };
+            
+            const closeModal = (modalEl) => { 
+                modalEl.classList.remove('modal-visible'); 
+                modalEl.classList.add('modal-hidden'); 
+                document.body.style.overflow = ''; 
+            };
+
+            // 渲染排班條件規則列表
+            const renderRulesList = () => {
+                if (!rulesList) {
+                    console.error('找不到 rulesList 元素');
+                    return;
+                }
+
+                rulesList.innerHTML = '';
+                
+                if (schedulingConditions.employeeRules.length === 0 && schedulingConditions.shiftRules.length === 0) {
+                    rulesList.innerHTML = '<p class="text-gray-500 text-center py-8">尚未設定任何規則</p>';
+                    return;
+                }
+
+                // 員工規則
+                if (schedulingConditions.employeeRules.length > 0) {
+                    const employeeRulesSection = document.createElement('div');
+                    employeeRulesSection.className = 'mb-6';
+                    employeeRulesSection.innerHTML = '<h5 class="font-semibold text-gray-700 mb-3">員工規則</h5>';
+                    
+                    schedulingConditions.employeeRules.forEach((rule, index) => {
+                        const ruleDiv = document.createElement('div');
+                        ruleDiv.className = 'bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2 flex items-center justify-between';
+                        
+                        let ruleText = '';
+                        switch (rule.type) {
+                            case 'maxConsecutiveWorkDays':
+                                ruleText = `${rule.employee} - 最多連續工作 ${rule.value} 天`;
+                                break;
+                            case 'no24HourShift':
+                                ruleText = `${rule.employee} - 禁止24小時連續工作`;
+                                break;
+                            case 'noDirectShiftTransition':
+                                ruleText = `${rule.employee} - 禁止班次直接銜接`;
+                                break;
+                            case 'balanceShifts':
+                                ruleText = `${rule.employee} - 白班夜班平衡（差距不超過 ${rule.value}）`;
+                                break;
+                            case 'preferredShift':
+                                ruleText = `${rule.employee} - 偏好班次設定`;
+                                break;
+                            case 'maxWeeklyShifts':
+                                ruleText = `${rule.employee} - 每週最多 ${rule.value} 班`;
+                                break;
+                        }
+                        
+                        ruleDiv.innerHTML = `
+                            <span class="text-sm text-gray-700">${ruleText}</span>
+                            <button class="delete-employee-rule-btn bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs transition-colors" data-index="${index}">
+                                刪除
+                            </button>
+                        `;
+                        employeeRulesSection.appendChild(ruleDiv);
+                    });
+                    
+                    rulesList.appendChild(employeeRulesSection);
+                }
+
+                // 班別規則
+                if (schedulingConditions.shiftRules.length > 0) {
+                    const shiftRulesSection = document.createElement('div');
+                    shiftRulesSection.innerHTML = '<h5 class="font-semibold text-gray-700 mb-3">班別規則</h5>';
+                    
+                    schedulingConditions.shiftRules.forEach((rule, index) => {
+                        const ruleDiv = document.createElement('div');
+                        ruleDiv.className = 'bg-green-50 border border-green-200 rounded-lg p-3 mb-2 flex items-center justify-between';
+                        
+                        const shiftName = shiftTypes[rule.shift] || rule.shift;
+                        let conditionText = '';
+                        switch (rule.type) {
+                            case 'minStaff':
+                                conditionText = `最少 ${rule.value} 人`;
+                                break;
+                            case 'maxStaff':
+                                conditionText = `最多 ${rule.value} 人`;
+                                break;
+                            case 'preferredStaff':
+                                conditionText = `建議 ${rule.value} 人`;
+                                break;
+                        }
+                        
+                        ruleDiv.innerHTML = `
+                            <span class="text-sm text-gray-700">${shiftName} - ${conditionText}</span>
+                            <button class="delete-shift-rule-btn bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs transition-colors" data-index="${index}">
+                                刪除
+                            </button>
+                        `;
+                        shiftRulesSection.appendChild(ruleDiv);
+                    });
+                    
+                    rulesList.appendChild(shiftRulesSection);
+                }
+            };
+
+            // 更新規則說明
+            const updateRuleDescription = () => {
+                if (!employeeRuleType) {
+                    console.error('找不到 employeeRuleType 元素');
+                    return;
+                }
+
+                const ruleType = employeeRuleType.value;
+                const descriptionEl = document.getElementById('ruleDescription');
+                
+                if (!descriptionEl) {
+                    console.error('找不到 ruleDescription 元素');
+                    return;
+                }
+                
+                const descriptions = {
+                    'maxConsecutiveWorkDays': '設定員工最多可連續工作的天數，避免過度疲勞',
+                    'no24HourShift': '禁止員工在夜班後隔天直接上白班，確保充分休息',
+                    'noDirectShiftTransition': '禁止班次直接銜接（如白班→小夜），需間隔至少兩個班次',
+                    'balanceShifts': '平衡員工的白班與夜班數量，設定允許的最大差距',
+                    'preferredShift': '設定員工偏好的班次類型',
+                    'maxWeeklyShifts': '限制員工每週最多上班次數'
+                };
+                
+                descriptionEl.textContent = descriptions[ruleType] || '請選擇規則類型查看說明';
+            };
+
+            // 日期選擇器填充
             const populateDateSelectors = () => {
                 const selectedYear = currentDate.getFullYear();
                 const selectedMonth = currentDate.getMonth() + 1;
+                
                 yearSelect.innerHTML = '';
                 for (let i = selectedYear - 5; i <= selectedYear + 5; i++) {
                     const option = document.createElement('option');
@@ -603,6 +1166,7 @@
                     option.style.color = '#374151';
                     yearSelect.appendChild(option);
                 }
+                
                 monthSelect.innerHTML = '';
                 const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
                 for (let i = 1; i <= 12; i++) {
@@ -612,11 +1176,11 @@
                     option.style.color = '#374151';
                     monthSelect.appendChild(option);
                 }
+                
                 yearSelect.value = selectedYear;
                 monthSelect.value = selectedMonth;
             };
 
-            // 新增：填充可用性設定的年月選擇器
             const populateAvailabilitySelectors = () => {
                 const currentYear = new Date().getFullYear();
                 
@@ -642,12 +1206,41 @@
                 availabilityMonthSelect.value = new Date().getMonth() + 1;
             };
 
+            const populateHolidaySelectors = () => {
+                const currentYear = new Date().getFullYear();
+                
+                holidayYearSelect.innerHTML = '';
+                for (let i = currentYear - 1; i <= currentYear + 2; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    option.style.color = '#374151';
+                    holidayYearSelect.appendChild(option);
+                }
+                
+                holidayMonthSelect.innerHTML = '';
+                for (let i = 1; i <= 12; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = `${i}月`;
+                    option.style.color = '#374151';
+                    holidayMonthSelect.appendChild(option);
+                }
+
+                holidayYearSelect.value = currentYear;
+                holidayMonthSelect.value = new Date().getMonth() + 1;
+            };
+
+            // 月份統計更新
             const updateMonthlyStats = () => {
                 const year = currentDate.getFullYear();
                 const month = currentDate.getMonth();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
                 let totalShifts = 0;
                 let workingDays = 0;
+                let holidayCount = 0;
+                let weekendCount = 0;
+                
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = formatDate(new Date(year, month, day));
                     const shifts = scheduleData[dateStr] || [];
@@ -655,14 +1248,22 @@
                         workingDays++;
                         totalShifts += shifts.length;
                     }
+                    if (isHoliday(dateStr)) {
+                        holidayCount++;
+                    }
+                    if (isWeekend(dateStr)) {
+                        weekendCount++;
+                    }
                 }
-                monthlyStats.innerHTML = `本月排班統計：${workingDays} 個工作日，共 ${totalShifts} 個班次`;
+                monthlyStats.innerHTML = `本月統計：${workingDays} 個工作日，共 ${totalShifts} 個班次 | 假日：${holidayCount} 天，週末：${weekendCount} 天`;
             };
 
+            // 渲染日曆
             const renderCalendar = () => {
                 populateDateSelectors();
                 updateMonthlyStats();
                 calendarDateGrid.innerHTML = '';
+                
                 const year = currentDate.getFullYear();
                 const month = currentDate.getMonth();
                 const firstDayOfMonth = new Date(year, month, 1).getDay();
@@ -670,6 +1271,8 @@
                 const prevMonth = month === 0 ? 11 : month - 1;
                 const prevYear = month === 0 ? year - 1 : year;
                 const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
+                
+                // 上個月的日期
                 for (let i = firstDayOfMonth - 1; i >= 0; i--) {
                     const day = daysInPrevMonth - i;
                     const cell = document.createElement('div');
@@ -677,14 +1280,18 @@
                     cell.innerHTML = `<div class="date-number text-gray-400">${day}</div><div class="mt-2 space-y-1 overflow-y-auto flex-grow"></div>`;
                     calendarDateGrid.appendChild(cell);
                 }
+                
+                // 本月的日期
                 for (let day = 1; day <= daysInMonth; day++) {
                     const date = new Date(year, month, day);
                     const dateStr = formatDate(date);
                     const cell = document.createElement('div');
                     cell.className = 'date-cell p-2 cursor-pointer relative flex flex-col';
-                    if (isToday(date)) cell.classList.add('today-cell');
                     
-                    // 新增：檢查並標示有員工不可用的日期
+                    if (isToday(date)) cell.classList.add('today-cell');
+                    if (isHoliday(dateStr)) cell.classList.add('holiday-cell');
+                    if (isWeekend(dateStr) && !isHoliday(dateStr)) cell.classList.add('weekend-cell');
+                    
                     if (hasUnavailableEmployees(dateStr)) {
                         cell.classList.add('unavailable-cell');
                         const unavailableIndicator = document.createElement('div');
@@ -694,11 +1301,30 @@
                         cell.appendChild(unavailableIndicator);
                     }
                     
+                    if (isHoliday(dateStr)) {
+                        const holidayIndicator = document.createElement('div');
+                        holidayIndicator.className = 'holiday-indicator';
+                        holidayIndicator.textContent = 'H';
+                        holidayIndicator.title = '假日班（兩班制）';
+                        cell.appendChild(holidayIndicator);
+                    }
+
+                    if (isWeekend(dateStr) && !isHoliday(dateStr)) {
+                        const weekendIndicator = document.createElement('div');
+                        weekendIndicator.className = 'weekend-indicator';
+                        weekendIndicator.textContent = 'W';
+                        weekendIndicator.title = '週末（兩班制）';
+                        cell.appendChild(weekendIndicator);
+                    }
+                    
                     cell.dataset.date = dateStr;
                     const dateNumber = document.createElement('div');
                     dateNumber.className = 'date-number text-gray-700 font-semibold';
                     if (isToday(date)) dateNumber.classList.add('today-number', 'text-white');
+                    if (isHoliday(dateStr) && !isToday(date)) dateNumber.classList.add('holiday-number', 'text-white');
+                    if (isWeekend(dateStr) && !isHoliday(dateStr) && !isToday(date)) dateNumber.classList.add('weekend-number', 'text-white');
                     dateNumber.textContent = day;
+                    
                     const shiftsContainer = document.createElement('div');
                     shiftsContainer.className = 'mt-2 space-y-1 overflow-y-auto flex-grow';
                     const shifts = scheduleData[dateStr] || [];
@@ -710,10 +1336,13 @@
                         shiftEl.title = `${shift.employee}: ${shiftTypes[shift.shift]}`;
                         shiftsContainer.appendChild(shiftEl);
                     });
+                    
                     cell.appendChild(dateNumber);
                     cell.appendChild(shiftsContainer);
                     calendarDateGrid.appendChild(cell);
                 }
+                
+                // 下個月的日期
                 const totalCells = firstDayOfMonth + daysInMonth;
                 const remainingCells = Math.ceil(totalCells / 7) * 7 - totalCells;
                 for (let day = 1; day <= remainingCells; day++) {
@@ -724,13 +1353,14 @@
                 }
             };
 
+            // 渲染員工列表
             const renderEmployees = () => {
                 employeeList.innerHTML = '';
-                ruleEmployeeSelect.innerHTML = '';
                 availabilityEmployeeSelect.innerHTML = '<option value="">請選擇員工</option>';
+                ruleEmployeeSelect.innerHTML = '<option value="">請選擇員工</option>';
+                
                 if (employees.length === 0) {
                     employeeList.innerHTML = '<p class="text-white/70 text-sm text-center py-4">尚未新增任何員工</p>';
-                    ruleEmployeeSelect.innerHTML = '<option value="" disabled>請先新增員工</option>';
                 } else {
                     employees.forEach((name, index) => {
                         const employeeDiv = document.createElement('div');
@@ -747,23 +1377,24 @@
                             </div>
                         `;
                         employeeList.appendChild(employeeDiv);
-                        const option = document.createElement('option');
-                        option.value = name;
-                        option.textContent = name;
-                        option.style.color = '#374151';
-                        ruleEmployeeSelect.appendChild(option);
                         
                         const availOption = document.createElement('option');
                         availOption.value = name;
                         availOption.textContent = name;
                         availOption.style.color = '#374151';
                         availabilityEmployeeSelect.appendChild(availOption);
+
+                        const ruleOption = document.createElement('option');
+                        ruleOption.value = name;
+                        ruleOption.textContent = name;
+                        ruleOption.style.color = '#374151';
+                        ruleEmployeeSelect.appendChild(ruleOption);
                     });
                 }
                 lucide.createIcons();
             };
 
-            // 新增：渲染員工可用性日曆
+            // 渲染員工可用性日曆
             const renderAvailabilityCalendar = () => {
                 const employee = availabilityEmployeeSelect.value;
                 const year = parseInt(availabilityYearSelect.value);
@@ -786,18 +1417,15 @@
                     <div class="availability-calendar">
                 `;
 
-                // 星期標題
                 const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
                 weekdays.forEach(day => {
                     calendarHTML += `<div class="text-center text-sm font-semibold text-gray-600 p-2">${day}</div>`;
                 });
 
-                // 前月空白日
                 for (let i = 0; i < firstDay; i++) {
                     calendarHTML += '<div></div>';
                 }
 
-                // 本月日期
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                     const availability = employeeAvailability[employee][dateStr];
@@ -824,406 +1452,71 @@
                 availabilityCalendarContainer.innerHTML = calendarHTML;
             };
 
-            const renderRulesList = () => {
-                rulesList.innerHTML = '';
-                const allRules = [...schedulingConditions.employeeRules, ...schedulingConditions.shiftRules];
-                if (allRules.length === 0) {
-                    rulesList.innerHTML = '<p class="text-gray-500 text-center py-8">目前沒有任何排班條件</p>';
+            // 渲染假日設定日曆
+            const renderHolidayCalendar = () => {
+                const year = parseInt(holidayYearSelect.value);
+                const month = parseInt(holidayMonthSelect.value);
+
+                if (!year || !month) {
+                    holidayCalendarContainer.innerHTML = '<p class="text-gray-500 text-center py-8">請先選擇月份</p>';
                     return;
                 }
-                allRules.forEach(rule => {
-                    const ruleType = rule.employee ? 'employee' : 'shift';
-                    const ruleDiv = document.createElement('div');
-                    ruleDiv.className = 'flex items-center justify-between bg-gray-50 p-4 rounded-lg border';
-                    ruleDiv.innerHTML = `<div class="flex items-center gap-3"><i data-lucide="${rule.employee ? 'user' : 'clock'}" class="w-4 h-4 text-gray-500"></i><span class="text-gray-800 font-medium">${rule.text}</span></div><button class="delete-rule-btn p-2 rounded-full hover:bg-red-100 transition-colors" data-id="${rule.id}" data-type="${ruleType}"><i data-lucide="trash-2" class="w-4 h-4 text-red-500 pointer-events-none"></i></button>`;
-                    rulesList.appendChild(ruleDiv);
-                });
-                lucide.createIcons();
-            };
 
-            const openModal = (modalEl) => { modalEl.classList.remove('modal-hidden'); modalEl.classList.add('modal-visible'); document.body.style.overflow = 'hidden'; };
-            const closeModal = (modalEl) => { modalEl.classList.remove('modal-visible'); modalEl.classList.add('modal-hidden'); document.body.style.overflow = ''; };
-
-            const generateReport = () => {
-                const year = currentDate.getFullYear();
-                const month = currentDate.getMonth() + 1;
                 const daysInMonth = new Date(year, month, 0).getDate();
-                const employeeStats = {};
-                employees.forEach(e => { employeeStats[e] = { day: 0, night: 0, off: 0, total: 0 }; });
+                const firstDay = new Date(year, month - 1, 1).getDay();
+
+                let calendarHTML = `
+                    <h4 class="text-lg font-semibold mb-4 text-gray-800">${year}年${month}月 假日班設定</h4>
+                    <div class="availability-calendar">
+                `;
+
+                const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+                weekdays.forEach(day => {
+                    calendarHTML += `<div class="text-center text-sm font-semibold text-gray-600 p-2">${day}</div>`;
+                });
+
+                for (let i = 0; i < firstDay; i++) {
+                    calendarHTML += '<div></div>';
+                }
+
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    (scheduleData[dateStr] || []).forEach(shift => {
-                        if (employeeStats[shift.employee] && shiftTypes.hasOwnProperty(shift.shift)) {
-                            employeeStats[shift.employee][shift.shift]++;
-                            employeeStats[shift.employee].total++;
-                        }
-                    });
+                    const isHolidayDate = isHoliday(dateStr);
+                    const isWeekendDate = isWeekend(dateStr);
+                    
+                    let className = 'availability-day availability-neutral';
+                    let text = day;
+                    
+                    if (isHolidayDate) {
+                        className = 'availability-day bg-yellow-200 border-yellow-500 text-yellow-800';
+                        text = `${day} H`;
+                    } else if (isWeekendDate) {
+                        className = 'availability-day bg-blue-100 border-blue-300 text-blue-700';
+                        text = `${day} W`;
+                    }
+                    
+                    calendarHTML += `
+                        <div class="${className}" data-date="${dateStr}" data-holiday="${isHolidayDate}">
+                            ${text}
+                        </div>
+                    `;
                 }
-                let reportHTML = `<div class="space-y-8"><div class="grid grid-cols-1 lg:grid-cols-2 gap-8"><div class="bg-gradient-to-br from-blue-50 to-indigo-100 p-6 rounded-xl"><h4 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="users" class="w-5 h-5"></i>員工班次統計</h4><div class="space-y-3">`;
-                Object.entries(employeeStats).forEach(([employee, stats]) => {
-                    reportHTML += `<div class="bg-white p-4 rounded-lg shadow-sm"><div class="font-semibold text-gray-800 mb-2">${employee}</div><div class="grid grid-cols-3 gap-2 text-sm"><div class="text-center"><div class="font-medium text-green-600">白班</div><div class="text-lg font-bold">${stats.day}</div></div><div class="text-center"><div class="font-medium text-gray-800">夜班</div><div class="text-lg font-bold">${stats.night}</div></div><div class="text-center"><div class="font-medium text-amber-600">休假</div><div class="text-lg font-bold">${stats.off}</div></div></div><div class="mt-2 pt-2 border-t text-center"><span class="text-sm text-gray-600">總計: </span><span class="font-bold text-lg">${stats.total}</span></div></div>`;
-                });
-                reportHTML += `</div></div><div class="bg-gradient-to-br from-purple-50 to-pink-100 p-6 rounded-xl"><h4 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="calendar" class="w-5 h-5"></i>月份總覽</h4><div class="grid grid-cols-2 gap-4">`;
-                const totalStats = { day: 0, night: 0, off: 0 };
-                Object.values(employeeStats).forEach(stats => { Object.keys(totalStats).forEach(s => totalStats[s] += stats[s]); });
-                Object.entries(totalStats).forEach(([shift, count]) => {
-                    reportHTML += `<div class="bg-white p-4 rounded-lg text-center shadow-sm"><div class="text-sm font-medium text-gray-600">${shiftTypes[shift]}</div><div class="text-2xl font-bold text-gray-800">${count}</div></div>`;
-                });
-                reportHTML += `</div></div></div></div>`;
-                reportContent.innerHTML = reportHTML;
-                lucide.createIcons();
-                openModal(reportModal);
-            };
 
-            const handleDateChange = () => {
-                const newYear = parseInt(yearSelect.value);
-                const newMonth = parseInt(monthSelect.value) - 1;
-                currentDate = new Date(newYear, newMonth, 1);
-                renderCalendar();
+                calendarHTML += '</div>';
+                holidayCalendarContainer.innerHTML = calendarHTML;
             };
-            yearSelect.addEventListener('change', handleDateChange);
-            monthSelect.addEventListener('change', handleDateChange);
-            prevMonthBtn.addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
-            nextMonthBtn.addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
-
-            addEmployeeBtn.addEventListener('click', () => {
-                const name = employeeNameInput.value.trim();
-                if (name && !employees.includes(name)) {
-                    employees.push(name);
-                    saveData();
-                    renderEmployees();
-                    employeeNameInput.value = '';
-                } else if (employees.includes(name)) {
-                    alert('員工姓名已存在！');
-                }
-            });
-            employeeNameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addEmployeeBtn.click(); });
             
-            employeeList.addEventListener('click', (e) => {
-                const deleteBtn = e.target.closest('.delete-employee-btn');
-                const availabilityBtn = e.target.closest('.availability-employee-btn');
-                
-                if (deleteBtn) {
-                    const index = parseInt(deleteBtn.dataset.index);
-                    const nameToDelete = employees[index];
-                    if (confirm(`確定要刪除員工 "${nameToDelete}" 嗎？\n這將移除所有相關的班次、規則與可用性設定。`)) {
-                        employees.splice(index, 1);
-                        Object.keys(scheduleData).forEach(date => {
-                            scheduleData[date] = scheduleData[date].filter(s => s.employee !== nameToDelete);
-                            if (scheduleData[date].length === 0) delete scheduleData[date];
-                        });
-                        schedulingConditions.employeeRules = schedulingConditions.employeeRules.filter(r => r.employee !== nameToDelete);
-                        delete employeeAvailability[nameToDelete]; // 新增：刪除可用性資料
-                        saveData();
-                        renderEmployees();
-                        renderCalendar();
-                    }
-                }
-                
-                if (availabilityBtn) {
-                    const employee = availabilityBtn.dataset.employee;
-                    availabilityEmployeeSelect.value = employee;
-                    populateAvailabilitySelectors();
-                    renderAvailabilityCalendar();
-                    openModal(availabilityModal);
-                }
-            });
-
-            // 員工可用性 Modal 事件
-            openAvailabilityModalBtn.addEventListener('click', () => {
-                populateAvailabilitySelectors();
-                renderAvailabilityCalendar();
-                openModal(availabilityModal);
-            });
-            closeAvailabilityModalBtn.addEventListener('click', () => closeModal(availabilityModal));
-            availabilityModal.addEventListener('click', (e) => { if (e.target === availabilityModal) closeModal(availabilityModal); });
-
-            availabilityEmployeeSelect.addEventListener('change', renderAvailabilityCalendar);
-            availabilityYearSelect.addEventListener('change', renderAvailabilityCalendar);
-            availabilityMonthSelect.addEventListener('change', renderAvailabilityCalendar);
-
-            // 可用性日曆點擊事件
-            availabilityCalendarContainer.addEventListener('click', (e) => {
-                const dayEl = e.target.closest('.availability-day');
-                if (!dayEl) return;
-                
-                const date = dayEl.dataset.date;
-                const employee = dayEl.dataset.employee;
-                
-                if (!employeeAvailability[employee]) {
-                    employeeAvailability[employee] = {};
-                }
-                
-                const current = employeeAvailability[employee][date];
-                let newState;
-                
-                if (current === undefined) {
-                    newState = true; // 無狀態 → 可用
-                } else if (current === true) {
-                    newState = false; // 可用 → 不可用
-                } else {
-                    newState = undefined; // 不可用 → 無狀態
-                    delete employeeAvailability[employee][date];
-                }
-                
-                if (newState !== undefined) {
-                    employeeAvailability[employee][date] = newState;
-                }
-                
-                saveData();
-                renderAvailabilityCalendar();
-                renderCalendar(); // 重新渲染主日曆以更新不可用指示器
-            });
-
-            // 可用性批量設定按鈕
-            clearAvailabilityBtn.addEventListener('click', () => {
-                const employee = availabilityEmployeeSelect.value;
-                if (!employee) return;
-                
-                if (confirm(`確定要清空 ${employee} 的所有可用性設定嗎？`)) {
-                    employeeAvailability[employee] = {};
-                    saveData();
-                    renderAvailabilityCalendar();
-                    renderCalendar();
-                }
-            });
-
-            setAllAvailableBtn.addEventListener('click', () => {
-                const employee = availabilityEmployeeSelect.value;
-                const year = parseInt(availabilityYearSelect.value);
-                const month = parseInt(availabilityMonthSelect.value);
-                
-                if (!employee || !year || !month) return;
-                
-                if (!employeeAvailability[employee]) {
-                    employeeAvailability[employee] = {};
-                }
-                
-                const daysInMonth = new Date(year, month, 0).getDate();
-                for (let day = 1; day <= daysInMonth; day++) {
-                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    employeeAvailability[employee][dateStr] = true;
-                }
-                
-                saveData();
-                renderAvailabilityCalendar();
-                renderCalendar();
-            });
-
-            setAllUnavailableBtn.addEventListener('click', () => {
-                const employee = availabilityEmployeeSelect.value;
-                const year = parseInt(availabilityYearSelect.value);
-                const month = parseInt(availabilityMonthSelect.value);
-                
-                if (!employee || !year || !month) return;
-                
-                if (!employeeAvailability[employee]) {
-                    employeeAvailability[employee] = {};
-                }
-                
-                const daysInMonth = new Date(year, month, 0).getDate();
-                for (let day = 1; day <= daysInMonth; day++) {
-                    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    employeeAvailability[employee][dateStr] = false;
-                }
-                
-                saveData();
-                renderAvailabilityCalendar();
-                renderCalendar();
-            });
-
-            calendarDateGrid.addEventListener('click', (e) => {
-                const dateCell = e.target.closest('.date-cell');
-                if (!dateCell) return;
-                const shiftItem = e.target.closest('.shift-item');
-                const date = dateCell.dataset.date;
-                modalEmployeeSelect.innerHTML = '<option value="" disabled selected>請選擇員工</option>';
-                
-                // 過濾可用的員工（排除在該日期不可用的員工）
-                employees.forEach(name => {
-                    const isAvailable = !employeeAvailability[name] || employeeAvailability[name][date] !== false;
-                    if (isAvailable || (shiftItem && scheduleData[date] && scheduleData[date][parseInt(shiftItem.dataset.index)].employee === name)) {
-                        const option = document.createElement('option');
-                        option.value = name;
-                        option.textContent = name + (isAvailable ? '' : ' (不可用)');
-                        option.style.color = isAvailable ? '#374151' : '#dc2626';
-                        if (!isAvailable) option.disabled = true;
-                        modalEmployeeSelect.appendChild(option);
-                    }
-                });
-                
-                if (shiftItem) {
-                    const index = parseInt(shiftItem.dataset.index);
-                    const shift = scheduleData[date][index];
-                    shiftModalTitle.textContent = `${date} - 編輯班次`;
-                    selectedDateInput.value = date;
-                    editingShiftIndex.value = index;
-                    modalEmployeeSelect.value = shift.employee;
-                    modalShiftTypeSelect.value = shift.shift;
-                    deleteShiftBtn.classList.remove('hidden');
-                } else {
-                    shiftModalTitle.textContent = `${date} - 新增班次`;
-                    selectedDateInput.value = date;
-                    editingShiftIndex.value = '';
-                    shiftForm.reset();
-                    deleteShiftBtn.classList.add('hidden');
-                }
-                openModal(shiftModal);
-            });
-            closeShiftModalBtn.addEventListener('click', () => closeModal(shiftModal));
-            shiftModal.addEventListener('click', (e) => { if (e.target === shiftModal) closeModal(shiftModal); });
-            shiftForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const date = selectedDateInput.value;
-                const employee = modalEmployeeSelect.value;
-                if (!employee) { alert('請選擇一位員工！'); return; }
-                
-                // 檢查員工可用性
-                if (employeeAvailability[employee] && employeeAvailability[employee][date] === false) {
-                    if (!confirm(`${employee} 在 ${date} 設定為不可用，確定要安排班次嗎？`)) {
-                        return;
-                    }
-                }
-                
-                const shift = modalShiftTypeSelect.value;
-                const index = editingShiftIndex.value;
-                const newShift = { employee, shift };
-                if (!scheduleData[date]) scheduleData[date] = [];
-                if (index !== '') { scheduleData[date][index] = newShift; } 
-                else { scheduleData[date].push(newShift); }
-                saveData();
-                renderCalendar();
-                closeModal(shiftModal);
-            });
-            deleteShiftBtn.addEventListener('click', () => {
-                if (confirm('確定要刪除這個班次嗎？')) {
-                    const date = selectedDateInput.value;
-                    const index = parseInt(editingShiftIndex.value);
-                    scheduleData[date].splice(index, 1);
-                    if (scheduleData[date].length === 0) delete scheduleData[date];
-                    saveData();
-                    renderCalendar();
-                    closeModal(shiftModal);
-                }
-            });
-
-            openConditionsModalBtn.addEventListener('click', () => { renderRulesList(); openModal(conditionsModal); });
-            closeConditionsModalBtn.addEventListener('click', () => closeModal(conditionsModal));
-            conditionsModal.addEventListener('click', (e) => { if (e.target === conditionsModal) closeModal(conditionsModal); });
-            
-            document.getElementById('employeeRuleType').addEventListener('change', (e) => {
-                const valueInput = document.getElementById('employeeRuleValue');
-                const ruleType = e.target.value;
-                
-                if (ruleType === 'no24HourShift') {
-                    valueInput.style.display = 'none';
-                } else if (ruleType === 'balanceShifts') {
-                    valueInput.style.display = 'block';
-                    valueInput.value = 2;
-                    valueInput.min = 1;
-                    valueInput.max = 10;
-                } else { // maxConsecutiveWorkDays
-                    valueInput.style.display = 'block';
-                    valueInput.value = 5;
-                    valueInput.min = 1;
-                    valueInput.max = 30;
-                }
-            });
-
-            employeeRuleForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const employee = ruleEmployeeSelect.value;
-                if (!employee) { alert('請先新增並選擇一位員工。'); return; }
-                const type = document.getElementById('employeeRuleType').value;
-                const valueInput = document.getElementById('employeeRuleValue');
-                
-                let ruleText, value;
-                
-                if (type === 'no24HourShift') {
-                    value = null;
-                    ruleText = `${employee}：禁止夜班後隔天接白班`;
-                } else if (type === 'balanceShifts') {
-                    value = parseInt(valueInput.value);
-                    if (isNaN(value) || value < 1) {
-                        alert('請輸入有效的數字！');
-                        return;
-                    }
-                    ruleText = `${employee}：白班夜班差距不超過 ${value} 次`;
-                } else { // maxConsecutiveWorkDays
-                    value = parseInt(valueInput.value);
-                    if (isNaN(value) || value < 1) {
-                        alert('請輸入有效的數字！');
-                        return;
-                    }
-                    ruleText = `${employee}：最多連續工作 ${value} 天`;
-                }
-                
-                const newRule = { id: `emp_${Date.now()}`, employee, type, value, text: ruleText };
-                schedulingConditions.employeeRules.push(newRule);
-                saveData();
-                renderRulesList();
-                employeeRuleForm.reset();
-                valueInput.style.display = 'block';
-                document.getElementById('employeeRuleValue').value = 5;
-            });
-
-            shiftRuleForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const shift = document.getElementById('shiftRuleType').value;
-                const type = document.getElementById('shiftRuleCondition').value;
-                const value = parseInt(document.getElementById('shiftRuleValue').value);
-                const newRule = { id: `shift_${Date.now()}`, shift, type, value, text: `${shiftTypes[shift]}：每日最少 ${value} 人` };
-                schedulingConditions.shiftRules.push(newRule);
-                saveData();
-                renderRulesList();
-                shiftRuleForm.reset();
-                document.getElementById('shiftRuleValue').value = 1;
-            });
-            rulesList.addEventListener('click', (e) => {
-                const deleteBtn = e.target.closest('.delete-rule-btn');
-                if (deleteBtn) {
-                    if (confirm('確定要刪除這個規則嗎？')) {
-                        const { id, type } = deleteBtn.dataset;
-                        if (type === 'employee') {
-                            schedulingConditions.employeeRules = schedulingConditions.employeeRules.filter(r => r.id !== id);
-                        } else {
-                            schedulingConditions.shiftRules = schedulingConditions.shiftRules.filter(r => r.id !== id);
-                        }
-                        saveData();
-                        renderRulesList();
-                    }
-                }
-            });
-
-            autoScheduleBtn.addEventListener('click', () => { if (employees.length > 0) openModal(autoScheduleModal); else alert('請先新增員工！'); });
-            closeAutoScheduleModalBtn.addEventListener('click', () => closeModal(autoScheduleModal));
-            autoScheduleModal.addEventListener('click', (e) => { if (e.target === autoScheduleModal) closeModal(autoScheduleModal); });
-            // 自動排班核心演算法
             const autoSchedule = (config) => {
                 const {
-                    range,
-                    strategy,
-                    dayStaff,
-                    nightStaff,
-                    maxConsecutive,
-                    currentDate,
-                    employees,
-                    scheduleData,
-                    employeeAvailability,
-                    schedulingConditions
+                    range, strategy, dayStaff, eveningStaff, nightStaff,
+                    weekendDayStaff, weekendNightStaff, maxConsecutive, currentDate,
+                    employees, scheduleData, employeeAvailability, holidayDates, schedulingConditions
                 } = config;
-
+                
                 try {
                     const newSchedule = {};
-                    const stats = {
-                        scheduledDays: 0,
-                        dayShifts: 0,
-                        nightShifts: 0,
-                        skippedDays: 0,
-                        conflicts: 0
-                    };
-
-                    // 決定排班日期範圍
+                    const stats = { scheduledDays: 0, dayShifts: 0, eveningShifts: 0, nightShifts: 0, weekendDayShifts: 0, weekendNightShifts: 0, skippedDays: 0, conflicts: 0 };
+                    
                     const scheduleDates = [];
                     const addMonthDates = (year, month) => {
                         const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -1231,573 +1524,875 @@
                             scheduleDates.push(formatDate(new Date(year, month, day)));
                         }
                     };
-
-                    if (range === 'currentMonth') {
+                    if (range === 'currentMonth') addMonthDates(currentDate.getFullYear(), currentDate.getMonth());
+                    else if (range === 'nextMonth') { const d = new Date(currentDate); d.setMonth(d.getMonth() + 1); addMonthDates(d.getFullYear(), d.getMonth()); }
+                    else if (range === 'both') {
                         addMonthDates(currentDate.getFullYear(), currentDate.getMonth());
-                    } else if (range === 'nextMonth') {
-                        const nextMonth = new Date(currentDate);
-                        nextMonth.setMonth(nextMonth.getMonth() + 1);
-                        addMonthDates(nextMonth.getFullYear(), nextMonth.getMonth());
-                    } else if (range === 'both') {
-                        addMonthDates(currentDate.getFullYear(), currentDate.getMonth());
-                        const nextMonth = new Date(currentDate);
-                        nextMonth.setMonth(nextMonth.getMonth() + 1);
-                        addMonthDates(nextMonth.getFullYear(), nextMonth.getMonth());
+                        const d = new Date(currentDate); d.setMonth(d.getMonth() + 1); addMonthDates(d.getFullYear(), d.getMonth());
                     }
 
-                    // 初始化員工狀態追蹤
                     const employeeStats = {};
-                    employees.forEach(emp => {
-                        employeeStats[emp] = {
-                            totalShifts: 0,
-                            dayShifts: 0,
-                            nightShifts: 0,
-                            consecutiveWorkDays: 0,
-                            lastWorkDate: null,
-                            lastShiftType: null
-                        };
+                    employees.forEach(emp => { employeeStats[emp] = { totalShifts: 0, dayShifts: 0, eveningShifts: 0, nightShifts: 0, weekendDayShifts: 0, weekendNightShifts: 0 }; });
+
+                    Object.values(scheduleData).flat().forEach(shift => {
+                        if (employeeStats[shift.employee] && shift.shift !== 'off') {
+                            employeeStats[shift.employee].totalShifts++;
+                            const shiftKey = `${shift.shift.replace('-', '')}Shifts`;
+                            if(employeeStats[shift.employee][shiftKey] !== undefined) employeeStats[shift.employee][shiftKey]++;
+                        }
                     });
-
-                    // 計算現有排班對員工狀態的影響
-                    const updateEmployeeStatsFromExisting = () => {
-                        Object.keys(scheduleData).forEach(dateStr => {
-                            scheduleData[dateStr].forEach(shift => {
-                                if (employeeStats[shift.employee] && shift.shift !== 'off') {
-                                    employeeStats[shift.employee].totalShifts++;
-                                    if (shift.shift === 'day') employeeStats[shift.employee].dayShifts++;
-                                    if (shift.shift === 'night') employeeStats[shift.employee].nightShifts++;
-                                }
-                            });
-                        });
-                    };
-                    updateEmployeeStatsFromExisting();
-
-                    // 檢查員工是否可以在特定日期和班次工作
-                    const canEmployeeWork = (employee, date, shiftType, strict = true) => {
-                        // 檢查可用性
-                        if (employeeAvailability[employee] && employeeAvailability[employee][date] === false) {
-                            return false;
-                        }
-
-                        // 檢查是否已經安排班次（在現有資料和新排班中）
-                        const existingShifts = (scheduleData[date] || []).concat(newSchedule[date] || []);
-                        const hasExistingShift = existingShifts.some(s => s.employee === employee && s.shift !== 'off');
-                        if (hasExistingShift) return false;
-
-                        // 嚴格模式下的額外檢查
-                        if (strict) {
-                            // 檢查連續工作天數
-                            const consec = calculateConsecutiveWorkDays(employee, date, { ...scheduleData, ...newSchedule });
-                            if (consec >= maxConsecutive) return false;
-
-                            // 檢查24小時連續工作
-                            if (wouldCause24HourShift(employee, date, shiftType, { ...scheduleData, ...newSchedule })) {
-                                return false;
-                            }
-
-                            // 檢查員工規則
-                            if (schedulingConditions.employeeRules) {
-                                const employeeRule = schedulingConditions.employeeRules.find(r => 
-                                    r.employee === employee && r.type === 'maxConsecutiveWorkDays'
-                                );
-                                if (employeeRule && consec >= employeeRule.value) {
-                                    return false;
-                                }
-                            }
-                        }
-
-                        return true;
+                    
+                    const detailedCanEmployeeWorkCheck = (employee, date, shiftType, currentDaySchedule) => {
+                        const combinedSchedule = { ...scheduleData, ...newSchedule };
+                        
+                        if (employeeAvailability[employee]?.[date] === false) return { canWork: false, reason: '個人設定不可用' };
+                        if (currentDaySchedule.some(s => s.employee === employee)) return { canWork: false, reason: '本日已有排班' };
+                        
+                        if (RuleEngine.calculateConsecutiveWorkDays(employee, date, combinedSchedule) >= maxConsecutive) return { canWork: false, reason: `已達最大連續工作天(${maxConsecutive})` };
+                        if (RuleEngine.wouldCause24HourShift(employee, date, shiftType, combinedSchedule, holidayDates)) return { canWork: false, reason: '違反24小時輪班規則' };
+                        if (RuleEngine.wouldViolateShiftGap(employee, date, shiftType, combinedSchedule, holidayDates)) return { canWork: false, reason: '違反班次間隔規則' };
+                        
+                        return { canWork: true, reason: null };
                     };
 
-                    // 計算連續工作天數的輔助函數
-                    const calculateConsecutiveWorkDays = (employee, targetDate, allScheduleData) => {
-                        let consecutive = 0;
-                        const checkDate = new Date(targetDate);
-                        
-                        for (let i = 1; i <= maxConsecutive + 5; i++) {
-                            checkDate.setDate(checkDate.getDate() - 1);
-                            const checkDateStr = formatDate(checkDate);
-                            const shifts = allScheduleData[checkDateStr] || [];
-                            const isWorking = shifts.some(s => s.employee === employee && s.shift !== 'off');
-                            
-                            if (isWorking) {
-                                consecutive++;
-                            } else {
-                                break;
-                            }
-                        }
-                        return consecutive;
-                    };
-
-                    // 檢查24小時連續工作的輔助函數
-                    const wouldCause24HourShift = (employee, date, shiftType, allScheduleData) => {
-                        if (shiftType === 'off') return false;
-                        
-                        const currentDate = new Date(date);
-                        const prevDate = new Date(currentDate);
-                        prevDate.setDate(prevDate.getDate() - 1);
-                        const nextDate = new Date(currentDate);
-                        nextDate.setDate(nextDate.getDate() + 1);
-                        
-                        const prevDateStr = formatDate(prevDate);
-                        const nextDateStr = formatDate(nextDate);
-                        
-                        const prevShifts = allScheduleData[prevDateStr] || [];
-                        const nextShifts = allScheduleData[nextDateStr] || [];
-                        
-                        // 檢查夜班後接白班
-                        if (shiftType === 'day') {
-                            const hadNightShift = prevShifts.some(s => 
-                                s.employee === employee && s.shift === 'night'
-                            );
-                            if (hadNightShift) return true;
-                        }
-                        
-                        // 檢查白班後接夜班
-                        if (shiftType === 'night') {
-                            const willHaveDayShift = nextShifts.some(s => 
-                                s.employee === employee && s.shift === 'day'
-                            );
-                            if (willHaveDayShift) return true;
-                        }
-                        
-                        return false;
-                    };
-
-                    // 選擇員工的策略函數（改進版，確保公平分配）
-                    const selectEmployeesForShift = (availableEmployees, shiftType, requiredCount, date) => {
-                        if (availableEmployees.length < requiredCount) {
-                            return availableEmployees; // 回傳所有可用的員工
-                        }
-
-                        // 使用新的公平分配演算法
+                    const selectEmployeesForShift = (availableEmployees, shiftType, requiredStaff, date) => {
                         if (typeof RuleEngine !== 'undefined' && RuleEngine.selectEmployeesWithFairness) {
-                            return RuleEngine.selectEmployeesWithFairness(
-                                availableEmployees, 
-                                shiftType, 
-                                requiredCount, 
-                                employeeStats, 
-                                employees, 
-                                strategy, 
-                                date
-                            );
+                            return RuleEngine.selectEmployeesWithFairness(availableEmployees, shiftType, requiredStaff, employeeStats, employees, strategy, date);
                         }
-
-                        // 降級方案：使用原有邏輯
-                        let selected = [];
-
-                        if (strategy === 'balanced') {
-                            // 改進的平衡策略：優先考慮總班次最少的員工
-                            const sortedByBalance = [...availableEmployees].sort((a, b) => {
-                                const statsA = employeeStats[a];
-                                const statsB = employeeStats[b];
-                                
-                                // 優先考慮總班次數量
-                                if (statsA.totalShifts !== statsB.totalShifts) {
-                                    return statsA.totalShifts - statsB.totalShifts;
-                                }
-                                
-                                // 其次考慮班次平衡
-                                if (shiftType === 'day') {
-                                    // 安排白班時，優先選擇夜班較多的員工
-                                    if (statsA.nightShifts !== statsB.nightShifts) {
-                                        return statsB.nightShifts - statsA.nightShifts;
-                                    }
-                                } else if (shiftType === 'night') {
-                                    // 安排夜班時，優先選擇白班較多的員工
-                                    if (statsA.dayShifts !== statsB.dayShifts) {
-                                        return statsB.dayShifts - statsA.dayShifts;
-                                    }
-                                }
-                                
-                                // 最後按字母順序確保一致性
-                                return a.localeCompare(b);
-                            });
-                            selected = sortedByBalance.slice(0, requiredCount);
-                            
-                        } else if (strategy === 'minimize_night') {
-                            // 減少夜班策略
-                            if (shiftType === 'night') {
-                                const sortedByNight = [...availableEmployees].sort((a, b) => {
-                                    if (employeeStats[a].nightShifts !== employeeStats[b].nightShifts) {
-                                        return employeeStats[a].nightShifts - employeeStats[b].nightShifts;
-                                    }
-                                    return employeeStats[a].totalShifts - employeeStats[b].totalShifts;
-                                });
-                                selected = sortedByNight.slice(0, requiredCount);
-                            } else {
-                                const sortedByDay = [...availableEmployees].sort((a, b) => {
-                                    if (employeeStats[a].dayShifts !== employeeStats[b].dayShifts) {
-                                        return employeeStats[a].dayShifts - employeeStats[b].dayShifts;
-                                    }
-                                    return employeeStats[a].totalShifts - employeeStats[b].totalShifts;
-                                });
-                                selected = sortedByDay.slice(0, requiredCount);
-                            }
-                            
-                        } else if (strategy === 'rotate') {
-                            // 輪班策略：確保所有員工都有機會
-                            const sortedEmployees = [...availableEmployees].sort();
-                            const dayIndex = new Date(date).getDate();
-                            
-                            // 計算起始位置，確保輪流
-                            const totalDays = Object.keys(scheduleData).length + Object.keys(newSchedule).length;
-                            const startIndex = totalDays % sortedEmployees.length;
-                            
-                            for (let i = 0; i < requiredCount && i < sortedEmployees.length; i++) {
-                                const index = (startIndex + i) % sortedEmployees.length;
-                                selected.push(sortedEmployees[index]);
-                            }
-                        }
-
-                        return selected;
+                        return [...availableEmployees].sort((a, b) => (employeeStats[a]?.totalShifts || 0) - (employeeStats[b]?.totalShifts || 0)).slice(0, requiredStaff);
                     };
 
-                    // 主要排班邏輯
                     scheduleDates.forEach(date => {
-                        // 跳過已有排班的日期
-                        if (scheduleData[date] && scheduleData[date].length > 0) {
+                        if (scheduleData[date]?.length > 0) {
                             stats.skippedDays++;
                             return;
                         }
 
-                        const dayShiftsToSchedule = [];
-                        const nightShiftsToSchedule = [];
-                        let hasScheduledShifts = false;
-
-                        // 首先嘗試安排所需的班次
+                        const isHolidayDate = isWeekendOrHoliday(date);
+                        const shiftsToSchedule = [];
                         
-                        // 安排白班
-                        if (dayStaff > 0) {
-                            const availableForDay = employees.filter(emp => canEmployeeWork(emp, date, 'day'));
-                            const selectedForDay = selectEmployeesForShift(availableForDay, 'day', dayStaff, date);
-                            
-                            selectedForDay.forEach(emp => {
-                                dayShiftsToSchedule.push({ employee: emp, shift: 'day' });
-                                employeeStats[emp].totalShifts++;
-                                employeeStats[emp].dayShifts++;
-                                stats.dayShifts++;
-                                hasScheduledShifts = true;
-                            });
-                        }
-
-                        // 安排夜班（排除已安排白班的員工）
-                        if (nightStaff > 0) {
-                            const dayEmployees = dayShiftsToSchedule.map(s => s.employee);
-                            const availableForNight = employees.filter(emp => 
-                                canEmployeeWork(emp, date, 'night') && !dayEmployees.includes(emp)
-                            );
-                            const selectedForNight = selectEmployeesForShift(availableForNight, 'night', nightStaff, date);
-                            
-                            selectedForNight.forEach(emp => {
-                                nightShiftsToSchedule.push({ employee: emp, shift: 'night' });
-                                employeeStats[emp].totalShifts++;
-                                employeeStats[emp].nightShifts++;
-                                stats.nightShifts++;
-                                hasScheduledShifts = true;
-                            });
-                        }
-
-                        // 如果沒有安排到任何班次，嘗試至少安排一個人（確保每天都有人上班）
-                        if (!hasScheduledShifts && (dayStaff > 0 || nightStaff > 0)) {
-                            // 使用寬鬆模式重新嘗試
-                            const availableForDay = employees.filter(emp => canEmployeeWork(emp, date, 'day', false));
-                            const availableForNight = employees.filter(emp => canEmployeeWork(emp, date, 'night', false));
-                            
-                            // 優先嘗試安排白班
-                            if (availableForDay.length > 0 && dayStaff > 0) {
-                                const selectedEmp = selectEmployeesForShift(availableForDay, 'day', 1, date)[0];
-                                if (selectedEmp) {
-                                    dayShiftsToSchedule.push({ employee: selectedEmp, shift: 'day' });
-                                    employeeStats[selectedEmp].totalShifts++;
-                                    employeeStats[selectedEmp].dayShifts++;
-                                    stats.dayShifts++;
-                                    hasScheduledShifts = true;
-                                }
-                            }
-                            
-                            // 如果還是沒人，或夜班也需要人，嘗試安排夜班
-                            if ((!hasScheduledShifts || nightStaff > 0) && availableForNight.length > 0) {
-                                const dayEmployees = dayShiftsToSchedule.map(s => s.employee);
-                                const availableForNightFiltered = availableForNight.filter(emp => !dayEmployees.includes(emp));
+                        const scheduleShiftType = (shift, requiredStaff) => {
+                            if (requiredStaff > 0) {
+                                const alreadyAssigned = shiftsToSchedule.map(s => s.employee);
+                                const potentialEmployees = employees.filter(emp => !alreadyAssigned.includes(emp));
                                 
-                                if (availableForNightFiltered.length > 0) {
-                                    const selectedEmp = selectEmployeesForShift(availableForNightFiltered, 'night', 1, date)[0];
-                                    if (selectedEmp) {
-                                        nightShiftsToSchedule.push({ employee: selectedEmp, shift: 'night' });
-                                        employeeStats[selectedEmp].totalShifts++;
-                                        employeeStats[selectedEmp].nightShifts++;
-                                        stats.nightShifts++;
-                                        hasScheduledShifts = true;
+                                const availableEmployees = [];
+                                potentialEmployees.forEach(emp => {
+                                    const check = detailedCanEmployeeWorkCheck(emp, date, shift, shiftsToSchedule);
+                                    if(check.canWork) {
+                                        availableEmployees.push(emp);
                                     }
-                                }
-                            }
-                            
-                            // 最後手段：如果實在找不到人，至少安排一個人（忽略大部分限制）
-                            if (!hasScheduledShifts) {
-                                // 找出所有基本可用的員工（只檢查可用性設定和重複排班）
-                                const basicAvailable = employees.filter(emp => {
-                                    // 檢查可用性設定
-                                    if (employeeAvailability[emp] && employeeAvailability[emp][date] === false) {
-                                        return false;
-                                    }
-                                    // 檢查重複排班
-                                    const existingShifts = (scheduleData[date] || []).concat(newSchedule[date] || []);
-                                    const hasExistingShift = existingShifts.some(s => s.employee === emp && s.shift !== 'off');
-                                    return !hasExistingShift;
                                 });
+
+                                const selected = selectEmployeesForShift(availableEmployees, shift, requiredStaff, date);
                                 
-                                if (basicAvailable.length > 0) {
-                                    const emergencyEmp = selectEmployeesForShift(basicAvailable, 'day', 1, date)[0];
-                                    if (emergencyEmp) {
-                                        dayShiftsToSchedule.push({ employee: emergencyEmp, shift: 'day' });
-                                        employeeStats[emergencyEmp].totalShifts++;
-                                        employeeStats[emergencyEmp].dayShifts++;
-                                        stats.dayShifts++;
-                                        hasScheduledShifts = true;
-                                        console.warn(`${date}: 緊急安排 ${emergencyEmp}，可能違反某些規則`);
-                                    }
-                                }
+                                selected.forEach(emp => {
+                                    shiftsToSchedule.push({ employee: emp, shift: shift });
+                                    employeeStats[emp].totalShifts++;
+                                    const shiftKey = `${shift.replace('-', '')}Shifts`;
+                                    if(employeeStats[emp][shiftKey] !== undefined) employeeStats[emp][shiftKey]++;
+                                    stats[shiftKey] = (stats[shiftKey] || 0) + 1;
+                                });
                             }
-                        }
-
-                        // 檢查是否滿足基本需求
-                        const totalScheduled = dayShiftsToSchedule.length + nightShiftsToSchedule.length;
-                        const requiredTotal = dayStaff + nightStaff;
+                        };
                         
-                        // 如果安排的人數不足，但至少有人，記錄警告
-                        if (totalScheduled < requiredTotal && totalScheduled > 0) {
-                            console.warn(`${date}: 人力不足，需要${requiredTotal}人，只安排了${totalScheduled}人`);
+                        if (isHolidayDate) {
+                            scheduleShiftType('weekend-day', weekendDayStaff);
+                            scheduleShiftType('weekend-night', weekendNightStaff);
+                        } else {
+                            scheduleShiftType('day', dayStaff);
+                            scheduleShiftType('evening', eveningStaff);
+                            scheduleShiftType('night', nightStaff);
                         }
-
-                        // 記錄到新排班資料
-                        const allShifts = [...dayShiftsToSchedule, ...nightShiftsToSchedule];
-                        if (allShifts.length > 0) {
-                            newSchedule[date] = allShifts;
+                        
+                        if (shiftsToSchedule.length > 0) {
+                            newSchedule[date] = shiftsToSchedule;
                             stats.scheduledDays++;
                         } else {
                             stats.skippedDays++;
-                            console.warn(`${date}: 無法安排任何員工上班`);
                         }
                     });
-
-                    // 驗證排班結果
-                    const tempScheduleData = { ...scheduleData, ...newSchedule };
                     
-                    // 簡易衝突檢查
-                    Object.keys(newSchedule).forEach(date => {
-                        const shifts = tempScheduleData[date] || [];
-                        
-                        // 檢查員工重複排班
-                        const employeeShifts = {};
-                        shifts.forEach(shift => {
-                            if (shift.shift !== 'off') {
-                                if (employeeShifts[shift.employee]) {
-                                    stats.conflicts++;
-                                } else {
-                                    employeeShifts[shift.employee] = shift.shift;
-                                }
-                            }
-                        });
-                    });
-
-                    return {
-                        success: true,
-                        newSchedule,
-                        stats
-                    };
+                    return { success: true, newSchedule, stats };
 
                 } catch (error) {
-                    console.error('自動排班錯誤:', error);
-                    return {
-                        success: false,
-                        error: error.message || '未知錯誤'
-                    };
+                    console.error('自動排班過程發生錯誤:', error);
+                    return { success: false, error: error.message || '未知錯誤' };
                 }
             };
 
-            startAutoScheduleBtn.addEventListener('click', () => {
-                const range = document.getElementById('autoScheduleRange').value;
-                const strategy = document.getElementById('autoScheduleStrategy').value;
-                const dayStaff = parseInt(document.getElementById('dayShiftStaff').value);
-                const nightStaff = parseInt(document.getElementById('nightShiftStaff').value);
-                const maxConsecutive = parseInt(document.getElementById('maxConsecutiveDays').value);
+            // 事件監聽器設定
+            const setupEventListeners = () => {
+                // 排班條件設定事件
+                openConditionsModalBtn.addEventListener('click', () => {
+                    renderRulesList();
+                    updateRuleDescription();
+                    openModal(conditionsModal);
+                });
+                
+                closeConditionsModalBtn.addEventListener('click', () => closeModal(conditionsModal));
+                conditionsModal.addEventListener('click', (e) => { if (e.target === conditionsModal) closeModal(conditionsModal); });
+                employeeRuleType.addEventListener('change', updateRuleDescription);
 
-                if (employees.length === 0) {
-                    alert('請先新增員工！');
-                    return;
-                }
-
-                if (dayStaff + nightStaff > employees.length) {
-                    alert('所需人力超過員工總數！請調整人力需求設定。');
-                    return;
-                }
-
-                if (confirm(`確定要開始自動排班嗎？\n\n設定摘要：\n• 範圍：${range === 'currentMonth' ? '本月' : range === 'nextMonth' ? '下個月' : '本月+下個月'}\n• 策略：${strategy === 'balanced' ? '平衡分配' : strategy === 'minimize_night' ? '減少夜班' : '輪班制'}\n• 每日需求：白班${dayStaff}人，夜班${nightStaff}人\n• 最大連續工作：${maxConsecutive}天\n\n現有排班不會被覆蓋。`)) {
-                    
-                    const result = autoSchedule({
-                        range,
-                        strategy,
-                        dayStaff,
-                        nightStaff,
-                        maxConsecutive,
-                        currentDate,
-                        employees,
-                        scheduleData,
-                        employeeAvailability,
-                        schedulingConditions
-                    });
-
-                    if (result.success) {
-                        // 更新排班資料
-                        Object.assign(scheduleData, result.newSchedule);
-                        saveData();
-                        renderCalendar();
-                        closeModal(autoScheduleModal);
-                        
-                        // 計算每位員工的分配統計
-                        const finalStats = {};
-                        employees.forEach(emp => {
-                            finalStats[emp] = { totalShifts: 0, dayShifts: 0, nightShifts: 0 };
-                        });
-                        
-                        Object.values(result.newSchedule).forEach(dayShifts => {
-                            dayShifts.forEach(shift => {
-                                if (finalStats[shift.employee]) {
-                                    finalStats[shift.employee].totalShifts++;
-                                    if (shift.shift === 'day') finalStats[shift.employee].dayShifts++;
-                                    if (shift.shift === 'night') finalStats[shift.employee].nightShifts++;
-                                }
-                            });
-                        });
-                        
-                        // 生成詳細的統計報告
-                        let statsReport = '\n\n📊 員工排班統計：';
-                        employees.forEach(emp => {
-                            const stat = finalStats[emp];
-                            statsReport += `\n• ${emp}: 總計${stat.totalShifts}班 (白班${stat.dayShifts}, 夜班${stat.nightShifts})`;
-                        });
-                        
-                        // 檢查是否有員工沒有被分配到班次
-                        const unassignedEmployees = employees.filter(emp => finalStats[emp].totalShifts === 0);
-                        if (unassignedEmployees.length > 0) {
-                            statsReport += `\n\n⚠️ 未分配班次的員工: ${unassignedEmployees.join(', ')}`;
-                            statsReport += '\n建議檢查這些員工的可用性設定或調整排班策略。';
-                        }
-                        
-                        alert(`✅ 自動排班完成！\n\n統計：\n• 已安排 ${result.stats.scheduledDays} 個工作日\n• 白班班次：${result.stats.dayShifts} 個\n• 夜班班次：${result.stats.nightShifts} 個\n• 跳過 ${result.stats.skippedDays} 天（已有排班或無法安排）${statsReport}\n\n${result.stats.conflicts > 0 ? `⚠️ 有 ${result.stats.conflicts} 個潛在衝突，建議檢查排班。` : '🎉 沒有發現衝突！'}`);
+                employeeRuleForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const employee = ruleEmployeeSelect?.value;
+                    const ruleType = employeeRuleType?.value;
+                    const value = parseInt(employeeRuleValue?.value);
+                    if (!employee) { showNotification('請選擇員工', 'warning'); return; }
+                    if (!ruleType) { showNotification('請選擇規則類型', 'warning'); return; }
+                    if (isNaN(value) || value < 1) { showNotification('請輸入有效的數值', 'warning'); return; }
+                    const existingRule = schedulingConditions.employeeRules.find(r => r.employee === employee && r.type === ruleType);
+                    if (existingRule) {
+                        if (confirm('該員工已有相同類型的規則，是否要覆蓋？')) { existingRule.value = value; } else { return; }
                     } else {
-                        alert(`❌ 自動排班失敗：${result.error}`);
+                        schedulingConditions.employeeRules.push({ employee, type: ruleType, value });
                     }
-                }
-            });
-            clearMonthBtn.addEventListener('click', () => { 
-                if (confirm('確定要清空本月所有排班嗎？\n\n⚠️ 此操作無法復原！')) {
-                    const year = currentDate.getFullYear();
-                    const month = currentDate.getMonth() + 1;
+                    saveData();
+                    renderRulesList();
+                    employeeRuleForm.reset();
+                    updateRuleDescription();
+                    showNotification('員工規則已新增', 'success');
+                });
+
+                shiftRuleForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const shift = shiftRuleType?.value;
+                    const type = shiftRuleCondition?.value;
+                    const value = parseInt(shiftRuleValue?.value);
+                    if (!shift || !type) { showNotification('請選擇班別和條件類型', 'warning'); return; }
+                    if (isNaN(value) || value < 0) { showNotification('請輸入有效的數值', 'warning'); return; }
+                    const existingRule = schedulingConditions.shiftRules.find(r => r.shift === shift && r.type === type);
+                    if (existingRule) {
+                        if (confirm('該班別已有相同類型的規則，是否要覆蓋？')) { existingRule.value = value; } else { return; }
+                    } else {
+                        schedulingConditions.shiftRules.push({ shift, type, value });
+                    }
+                    saveData();
+                    renderRulesList();
+                    shiftRuleForm.reset();
+                    showNotification('班別規則已新增', 'success');
+                });
+
+                rulesList.addEventListener('click', (e) => {
+                    const deleteEmployeeRuleBtn = e.target.closest('.delete-employee-rule-btn');
+                    const deleteShiftRuleBtn = e.target.closest('.delete-shift-rule-btn');
+                    if (deleteEmployeeRuleBtn) {
+                        const index = parseInt(deleteEmployeeRuleBtn.dataset.index);
+                        if (confirm('確定要刪除這個員工規則嗎？')) {
+                            schedulingConditions.employeeRules.splice(index, 1);
+                            saveData();
+                            renderRulesList();
+                            showNotification('員工規則已刪除', 'success');
+                        }
+                    }
+                    if (deleteShiftRuleBtn) {
+                        const index = parseInt(deleteShiftRuleBtn.dataset.index);
+                        if (confirm('確定要刪除這個班別規則嗎？')) {
+                            schedulingConditions.shiftRules.splice(index, 1);
+                            saveData();
+                            renderRulesList();
+                            showNotification('班別規則已刪除', 'success');
+                        }
+                    }
+                });
+
+                setBasicRulesBtn.addEventListener('click', () => {
+                    if (employees.length === 0) { showNotification('請先新增員工', 'warning'); return; }
+                    employees.forEach(employee => {
+                        if (!schedulingConditions.employeeRules.find(r => r.employee === employee && r.type === 'maxConsecutiveWorkDays')) {
+                            schedulingConditions.employeeRules.push({ employee, type: 'maxConsecutiveWorkDays', value: 5 });
+                        }
+                        if (!schedulingConditions.employeeRules.find(r => r.employee === employee && r.type === 'no24HourShift')) {
+                            schedulingConditions.employeeRules.push({ employee, type: 'no24HourShift', value: 1 });
+                        }
+                    });
+                    saveData();
+                    renderRulesList();
+                    showNotification('基本安全規則已設定', 'success');
+                });
+
+                setBalancedRulesBtn.addEventListener('click', () => {
+                    if (employees.length === 0) { showNotification('請先新增員工', 'warning'); return; }
+                    employees.forEach(employee => {
+                        if (!schedulingConditions.employeeRules.find(r => r.employee === employee && r.type === 'balanceShifts')) {
+                            schedulingConditions.employeeRules.push({ employee, type: 'balanceShifts', value: 2 });
+                        }
+                    });
+                    saveData();
+                    renderRulesList();
+                    showNotification('平衡排班規則已設定', 'success');
+                });
+
+                clearAllRulesBtn.addEventListener('click', () => {
+                    if (confirm('確定要清空所有排班規則嗎？\n\n此操作無法復原！')) {
+                        schedulingConditions.employeeRules = [];
+                        schedulingConditions.shiftRules = [];
+                        saveData();
+                        renderRulesList();
+                        showNotification('所有規則已清空', 'success');
+                    }
+                });
+
+                // 其他事件監聽器
+                yearSelect.addEventListener('change', () => {
+                    const newYear = parseInt(yearSelect.value);
+                    const newMonth = parseInt(monthSelect.value) - 1;
+                    currentDate = new Date(newYear, newMonth, 1);
+                    renderCalendar();
+                });
+                
+                monthSelect.addEventListener('change', () => {
+                    const newYear = parseInt(yearSelect.value);
+                    const newMonth = parseInt(monthSelect.value) - 1;
+                    currentDate = new Date(newYear, newMonth, 1);
+                    renderCalendar();
+                });
+                
+                prevMonthBtn.addEventListener('click', () => { 
+                    currentDate.setMonth(currentDate.getMonth() - 1); 
+                    renderCalendar(); 
+                });
+                
+                nextMonthBtn.addEventListener('click', () => { 
+                    currentDate.setMonth(currentDate.getMonth() + 1); 
+                    renderCalendar(); 
+                });
+
+                addEmployeeBtn.addEventListener('click', () => {
+                    const name = employeeNameInput.value.trim();
+                    if (name && !employees.includes(name)) {
+                        employees.push(name);
+                        saveData();
+                        renderEmployees();
+                        employeeNameInput.value = '';
+                        showNotification(`成功新增員工 "${name}"`, 'success');
+                    } else if (employees.includes(name)) {
+                        showNotification('員工姓名已存在！', 'warning');
+                    } else {
+                        showNotification('請輸入員工姓名', 'warning');
+                    }
+                });
+                
+                employeeNameInput.addEventListener('keypress', (e) => { 
+                    if (e.key === 'Enter') addEmployeeBtn.click(); 
+                });
+
+                employeeList.addEventListener('click', (e) => {
+                    const deleteBtn = e.target.closest('.delete-employee-btn');
+                    const availabilityBtn = e.target.closest('.availability-employee-btn');
+                    
+                    if (deleteBtn) {
+                        const index = parseInt(deleteBtn.dataset.index);
+                        const nameToDelete = employees[index];
+                        if (confirm(`確定要刪除員工 "${nameToDelete}" 嗎？\n這將移除所有相關的班次與可用性設定。`)) {
+                            employees.splice(index, 1);
+                            Object.keys(scheduleData).forEach(date => {
+                                scheduleData[date] = scheduleData[date].filter(s => s.employee !== nameToDelete);
+                                if (scheduleData[date].length === 0) delete scheduleData[date];
+                            });
+                            delete employeeAvailability[nameToDelete];
+                            schedulingConditions.employeeRules = schedulingConditions.employeeRules.filter(r => r.employee !== nameToDelete);
+                            saveData();
+                            renderEmployees();
+                            renderCalendar();
+                            renderRulesList();
+                            showNotification(`已刪除員工 "${nameToDelete}"`, 'success');
+                        }
+                    }
+                    
+                    if (availabilityBtn) {
+                        const employee = availabilityBtn.dataset.employee;
+                        availabilityEmployeeSelect.value = employee;
+                        populateAvailabilitySelectors();
+                        renderAvailabilityCalendar();
+                        openModal(availabilityModal);
+                    }
+                });
+
+                openHolidayModalBtn.addEventListener('click', () => {
+                    populateHolidaySelectors();
+                    renderHolidayCalendar();
+                    openModal(holidayModal);
+                });
+                
+                closeHolidayModalBtn.addEventListener('click', () => closeModal(holidayModal));
+                holidayModal.addEventListener('click', (e) => { if (e.target === holidayModal) closeModal(holidayModal); });
+
+                holidayYearSelect.addEventListener('change', renderHolidayCalendar);
+                holidayMonthSelect.addEventListener('change', renderHolidayCalendar);
+
+                holidayCalendarContainer.addEventListener('click', (e) => {
+                    const dayEl = e.target.closest('.availability-day');
+                    if (!dayEl) return;
+                    
+                    const date = dayEl.dataset.date;
+                    const currentIsHoliday = dayEl.dataset.holiday === 'true';
+                    
+                    if (currentIsHoliday) {
+                        delete holidayDates[date];
+                        showNotification(`已取消 ${date} 的假日設定`, 'info');
+                    } else {
+                        holidayDates[date] = true;
+                        showNotification(`已設定 ${date} 為假日`, 'success');
+                    }
+                    
+                    saveData();
+                    renderHolidayCalendar();
+                    renderCalendar();
+                });
+
+                clearHolidaysBtn.addEventListener('click', () => {
+                    const year = parseInt(holidayYearSelect.value);
+                    const month = parseInt(holidayMonthSelect.value);
+                    
+                    if (!year || !month) return;
+                    
+                    if (confirm(`確定要清空 ${year}年${month}月 的所有假日設定嗎？`)) {
+                        const daysInMonth = new Date(year, month, 0).getDate();
+                        let clearedCount = 0;
+                        for (let day = 1; day <= daysInMonth; day++) {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            if (holidayDates[dateStr]) {
+                                delete holidayDates[dateStr];
+                                clearedCount++;
+                            }
+                        }
+                        saveData();
+                        renderHolidayCalendar();
+                        renderCalendar();
+                        showNotification(`已清空 ${clearedCount} 個假日設定`, 'success');
+                    }
+                });
+
+                setWeekendsHolidayBtn.addEventListener('click', () => {
+                    const year = parseInt(holidayYearSelect.value);
+                    const month = parseInt(holidayMonthSelect.value);
+                    
+                    if (!year || !month) return;
+                    
                     const daysInMonth = new Date(year, month, 0).getDate();
-                    let clearedCount = 0;
+                    let weekendCount = 0;
                     
                     for (let day = 1; day <= daysInMonth; day++) {
-                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                        if (scheduleData[dateStr]) {
-                            clearedCount += scheduleData[dateStr].length;
-                            delete scheduleData[dateStr];
+                        const date = new Date(year, month - 1, day);
+                        const dayOfWeek = date.getDay();
+                        
+                        if (dayOfWeek === 0 || dayOfWeek === 6) {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            holidayDates[dateStr] = true;
+                            weekendCount++;
                         }
                     }
                     
                     saveData();
+                    renderHolidayCalendar();
                     renderCalendar();
-                    closeModal(autoScheduleModal);
-                    alert(`✅ 本月排班已清空！\n共清除了 ${clearedCount} 個班次。`);
-                }
-            });
+                    showNotification(`已設定 ${weekendCount} 個週末為假日班`, 'success');
+                });
 
-            generateReportBtn.addEventListener('click', generateReport);
-            closeReportModalBtn.addEventListener('click', () => closeModal(reportModal));
-            reportModal.addEventListener('click', (e) => { if (e.target === reportModal) closeModal(reportModal); });
-            exportReportBtn.addEventListener('click', () => { alert('匯出報表功能開發中！'); });
-
-            validateScheduleBtn.addEventListener('click', () => {
-                console.log('開始驗證排班...', {
-                    currentDate,
-                    scheduleDataKeys: Object.keys(scheduleData),
-                    schedulingConditions,
-                    employeeAvailability: Object.keys(employeeAvailability)
+                openAvailabilityModalBtn.addEventListener('click', () => {
+                    populateAvailabilitySelectors();
+                    renderAvailabilityCalendar();
+                    openModal(availabilityModal);
                 });
                 
-                // 檢查8月26-27日的特定情況
-                const aug26 = '2025-08-26';
-                const aug27 = '2025-08-27';
-                console.log('檢查8月26-27日:', {
-                    aug26Shifts: scheduleData[aug26],
-                    aug27Shifts: scheduleData[aug27]
-                });
-                
-                RuleEngine.validate({ 
-                    currentDate, 
-                    scheduleData, 
-                    schedulingConditions, 
-                    shiftTypes, 
-                    calendarGrid: calendarDateGrid,
-                    employeeAvailability // 新增：傳入員工可用性資料
-                });
-            });
+                closeAvailabilityModalBtn.addEventListener('click', () => closeModal(availabilityModal));
+                availabilityModal.addEventListener('click', (e) => { if (e.target === availabilityModal) closeModal(availabilityModal); });
 
-            exportDataBtn.addEventListener('click', () => {
-                const dataStr = JSON.stringify({ 
-                    employees, 
-                    scheduleData, 
-                    schedulingConditions, 
-                    employeeAvailability // 新增：包含可用性資料
-                }, null, 2);
-                const blob = new Blob([dataStr], { type: 'application/json' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = `排班資料_${new Date().toISOString().slice(0, 10)}.json`;
-                link.click();
-                URL.revokeObjectURL(link.href);
-            });
-            importDataInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                if (confirm('匯入資料將會覆蓋目前的排班表、條件與可用性設定，確定要繼續嗎？')) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        try {
-                            const data = JSON.parse(event.target.result);
-                            if (data.employees && data.scheduleData && data.schedulingConditions) {
-                                employees = data.employees;
-                                scheduleData = data.scheduleData;
-                                schedulingConditions = data.schedulingConditions;
-                                employeeAvailability = data.employeeAvailability || {}; // 新增：載入可用性資料
-                                saveData();
-                                renderAll();
-                                alert('✅ 資料匯入成功！');
-                            } else {
-                                alert('❌ 檔案格式不正確！');
+                availabilityEmployeeSelect.addEventListener('change', renderAvailabilityCalendar);
+                availabilityYearSelect.addEventListener('change', renderAvailabilityCalendar);
+                availabilityMonthSelect.addEventListener('change', renderAvailabilityCalendar);
+
+                availabilityCalendarContainer.addEventListener('click', (e) => {
+                    const dayEl = e.target.closest('.availability-day');
+                    if (!dayEl) return;
+                    
+                    const date = dayEl.dataset.date;
+                    const employee = dayEl.dataset.employee;
+                    
+                    if (!employeeAvailability[employee]) {
+                        employeeAvailability[employee] = {};
+                    }
+                    
+                    const current = employeeAvailability[employee][date];
+                    let newState;
+                    
+                    if (current === undefined) {
+                        newState = true;
+                    } else if (current === true) {
+                        newState = false;
+                    } else {
+                        newState = undefined;
+                        delete employeeAvailability[employee][date];
+                    }
+                    
+                    if (newState !== undefined) {
+                        employeeAvailability[employee][date] = newState;
+                    }
+                    
+                    saveData();
+                    renderAvailabilityCalendar();
+                    renderCalendar();
+                });
+
+                clearAvailabilityBtn.addEventListener('click', () => {
+                    const employee = availabilityEmployeeSelect.value;
+                    const year = parseInt(availabilityYearSelect.value);
+                    const month = parseInt(availabilityMonthSelect.value);
+                    
+                    if (!employee || !year || !month) return;
+                    
+                    if (confirm(`確定要清空 ${employee} 在 ${year}年${month}月 的所有可用性設定嗎？`)) {
+                        const daysInMonth = new Date(year, month, 0).getDate();
+                        let clearedCount = 0;
+                        for (let day = 1; day <= daysInMonth; day++) {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            if (employeeAvailability[employee] && employeeAvailability[employee][dateStr] !== undefined) {
+                                delete employeeAvailability[employee][dateStr];
+                                clearedCount++;
                             }
-                        } catch (error) {
-                            alert('❌ 讀取檔案失敗。');
                         }
-                    };
-                    reader.readAsText(file);
-                }
-                e.target.value = '';
-            });
+                        saveData();
+                        renderAvailabilityCalendar();
+                        renderCalendar();
+                        showNotification(`已清空 ${clearedCount} 個可用性設定`, 'success');
+                    }
+                });
 
+                setAllAvailableBtn.addEventListener('click', () => {
+                    const employee = availabilityEmployeeSelect.value;
+                    const year = parseInt(availabilityYearSelect.value);
+                    const month = parseInt(availabilityMonthSelect.value);
+                    
+                    if (!employee || !year || !month) return;
+                    
+                    const daysInMonth = new Date(year, month, 0).getDate();
+                    if (!employeeAvailability[employee]) {
+                        employeeAvailability[employee] = {};
+                    }
+                    
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        employeeAvailability[employee][dateStr] = true;
+                    }
+                    
+                    saveData();
+                    renderAvailabilityCalendar();
+                    renderCalendar();
+                    showNotification(`已設定 ${employee} 整月可用`, 'success');
+                });
+
+                setAllUnavailableBtn.addEventListener('click', () => {
+                    const employee = availabilityEmployeeSelect.value;
+                    const year = parseInt(availabilityYearSelect.value);
+                    const month = parseInt(availabilityMonthSelect.value);
+                    
+                    if (!employee || !year || !month) return;
+                    
+                    const daysInMonth = new Date(year, month, 0).getDate();
+                    if (!employeeAvailability[employee]) {
+                        employeeAvailability[employee] = {};
+                    }
+                    
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                        employeeAvailability[employee][dateStr] = false;
+                    }
+                    
+                    saveData();
+                    renderAvailabilityCalendar();
+                    renderCalendar();
+                    showNotification(`已設定 ${employee} 整月不可用`, 'info');
+                });
+
+                calendarDateGrid.addEventListener('click', (e) => {
+                    const dateCell = e.target.closest('.date-cell');
+                    if (!dateCell) return;
+                    
+                    const shiftItem = e.target.closest('.shift-item');
+                    const date = dateCell.dataset.date;
+                    
+                    modalEmployeeSelect.innerHTML = '<option value="" disabled selected>請選擇員工</option>';
+                    
+                    employees.forEach(name => {
+                        const isAvailable = !employeeAvailability[name] || employeeAvailability[name][date] !== false;
+                        if (isAvailable || (shiftItem && scheduleData[date] && scheduleData[date][parseInt(shiftItem.dataset.index)].employee === name)) {
+                            const option = document.createElement('option');
+                            option.value = name;
+                            option.textContent = name + (isAvailable ? '' : ' (不可用)');
+                            option.style.color = isAvailable ? '#374151' : '#dc2626';
+                            if (!isAvailable) option.disabled = true;
+                            modalEmployeeSelect.appendChild(option);
+                        }
+                    });
+                    
+                    modalShiftTypeSelect.innerHTML = '';
+                    const availableShifts = getAvailableShiftTypes(date);
+                    Object.entries(availableShifts).forEach(([shiftKey, shiftName]) => {
+                        const option = document.createElement('option');
+                        option.value = shiftKey;
+                        option.textContent = shiftName;
+                        modalShiftTypeSelect.appendChild(option);
+                    });
+                    
+                    if (shiftItem) {
+                        const index = parseInt(shiftItem.dataset.index);
+                        const shift = scheduleData[date][index];
+                        shiftModalTitle.textContent = `${date} - 編輯班次`;
+                        selectedDateInput.value = date;
+                        editingShiftIndex.value = index;
+                        modalEmployeeSelect.value = shift.employee;
+                        modalShiftTypeSelect.value = shift.shift;
+                        deleteShiftBtn.classList.remove('hidden');
+                    } else {
+                        shiftModalTitle.textContent = `${date} - 新增班次`;
+                        selectedDateInput.value = date;
+                        editingShiftIndex.value = '';
+                        deleteShiftBtn.classList.add('hidden');
+                    }
+                    openModal(shiftModal);
+                });
+
+                closeShiftModalBtn.addEventListener('click', () => closeModal(shiftModal));
+                shiftModal.addEventListener('click', (e) => { if (e.target === shiftModal) closeModal(shiftModal); });
+                
+                shiftForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const date = selectedDateInput.value;
+                    const employee = modalEmployeeSelect.value;
+                    if (!employee) { 
+                        showNotification('請選擇一位員工！', 'warning'); 
+                        return; 
+                    }
+                    
+                    if (employeeAvailability[employee] && employeeAvailability[employee][date] === false) {
+                        if (!confirm(`${employee} 在 ${date} 設定為不可用，確定要安排班次嗎？`)) {
+                            return;
+                        }
+                    }
+                    
+                    const shift = modalShiftTypeSelect.value;
+                    const index = editingShiftIndex.value;
+                    const newShift = { employee, shift };
+                    
+                    if (!scheduleData[date]) scheduleData[date] = [];
+                    if (index !== '') { 
+                        scheduleData[date][index] = newShift; 
+                        showNotification('班次已更新', 'success');
+                    } else { 
+                        scheduleData[date].push(newShift);
+                        showNotification('班次已新增', 'success');
+                    }
+                    saveData();
+                    renderCalendar();
+                    closeModal(shiftModal);
+                });
+                
+                deleteShiftBtn.addEventListener('click', () => {
+                    if (confirm('確定要刪除這個班次嗎？')) {
+                        const date = selectedDateInput.value;
+                        const index = parseInt(editingShiftIndex.value);
+                        scheduleData[date].splice(index, 1);
+                        if (scheduleData[date].length === 0) delete scheduleData[date];
+                        saveData();
+                        renderCalendar();
+                        closeModal(shiftModal);
+                        showNotification('班次已刪除', 'success');
+                    }
+                });
+
+                autoScheduleBtn.addEventListener('click', () => {
+                    if (employees.length === 0) {
+                        showNotification('請先新增員工！', 'warning');
+                        return;
+                    }
+                    openModal(autoScheduleModal);
+                });
+
+                closeAutoScheduleModalBtn.addEventListener('click', () => closeModal(autoScheduleModal));
+                autoScheduleModal.addEventListener('click', (e) => { if (e.target === autoScheduleModal) closeModal(autoScheduleModal); });
+
+                startAutoScheduleBtn.addEventListener('click', () => {
+                    const config = {
+                        range: document.getElementById('autoScheduleRange').value,
+                        strategy: document.getElementById('autoScheduleStrategy').value,
+                        dayStaff: parseInt(document.getElementById('dayShiftStaff').value, 10),
+                        eveningStaff: parseInt(document.getElementById('eveningShiftStaff').value, 10),
+                        nightStaff: parseInt(document.getElementById('nightShiftStaff').value, 10),
+                        weekendDayStaff: parseInt(document.getElementById('weekendDayShiftStaff').value, 10),
+                        weekendNightStaff: parseInt(document.getElementById('weekendNightShiftStaff').value, 10),
+                        maxConsecutive: parseInt(document.getElementById('maxConsecutiveDays').value, 10),
+                        currentDate, employees, scheduleData, employeeAvailability, holidayDates, schedulingConditions
+                    };
+                    const maxRequired = Math.max(config.dayStaff + config.eveningStaff + config.nightStaff, config.weekendDayStaff + config.weekendNightStaff);
+                    if (maxRequired > employees.length) {
+                        alert('單日所需人力總數已超過員工總數，請調整人力需求。');
+                        return;
+                    }
+                    if (confirm('確定要開始自動排班嗎？現有排班資料的日期將會被跳過。')) {
+                        const result = autoSchedule(config);
+                        if (result.success) {
+                            Object.assign(scheduleData, result.newSchedule);
+                            saveData();
+                            renderCalendar();
+                            closeModal(autoScheduleModal);
+                            alert(`✅ 自動排班完成！\n\n已安排 ${result.stats.scheduledDays} 個工作日，跳過 ${result.stats.skippedDays} 天。\n詳細日誌請見開發者主控台。`);
+                        } else {
+                            alert(`❌ 自動排班失敗：${result.error}`);
+                        }
+                    }
+                });
+
+                clearMonthBtn.addEventListener('click', () => {                 
+                    if (confirm('確定要清空本月所有排班嗎？\n\n⚠️ 此操作無法復原！')) {
+                        const year = currentDate.getFullYear(), month = currentDate.getMonth() + 1;
+                        const daysInMonth = new Date(year, month, 0).getDate();
+                        let clearedCount = 0;
+                        for (let day = 1; day <= daysInMonth; day++) {
+                            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                            if (scheduleData[dateStr]) {
+                                clearedCount += scheduleData[dateStr].length;
+                                delete scheduleData[dateStr];
+                            }
+                        }
+                        saveData();
+                        renderCalendar();
+                        closeModal(autoScheduleModal);
+                        showNotification(`✅ 本月排班已清空！共清除了 ${clearedCount} 個班次。`, 'success');
+                    }
+                });
+
+                validateScheduleBtn.addEventListener('click', () => {
+                    let conflicts = [];
+                    let stats = {
+                        totalShifts: 0,
+                        employees: employees.length,
+                        workingDays: 0,
+                        holidays: 0,
+                        weekends: 0
+                    };
+
+                    const year = currentDate.getFullYear();
+                    const month = currentDate.getMonth();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = formatDate(new Date(year, month, day));
+                        const shifts = scheduleData[dateStr] || [];
+                        
+                        if (shifts.length > 0) {
+                            stats.workingDays++;
+                            stats.totalShifts += shifts.length;
+                        }
+                        
+                        if (isHoliday(dateStr)) stats.holidays++;
+                        if (isWeekend(dateStr)) stats.weekends++;
+
+                        shifts.forEach(shift => {
+                            if (shift.shift !== 'off' && employeeAvailability[shift.employee]?.[dateStr] === false) {
+                                conflicts.push(`${dateStr}: ${shift.employee} 在此日設定為不可用`);
+                            }
+                        });
+
+                        const employeeShifts = {};
+                        shifts.forEach(shift => {
+                            if (shift.shift !== 'off') {
+                                if (!employeeShifts[shift.employee]) employeeShifts[shift.employee] = [];
+                                employeeShifts[shift.employee].push(shift.shift);
+                            }
+                        });
+                        
+                        Object.entries(employeeShifts).forEach(([employee, empShifts]) => {
+                            if (empShifts.length > 1) {
+                                conflicts.push(`${dateStr}: ${employee} 在同一天被安排多個班次: ${empShifts.join(', ')}`);
+                            }
+                        });
+                    }
+
+                    const conflictCount = conflicts.length;
+                    let report = `📋 排班驗證報告\n\n`;
+                    report += `📊 基本統計：\n`;
+                    report += `• 員工數量：${stats.employees} 人\n`;
+                    report += `• 工作日：${stats.workingDays} 天\n`;
+                    report += `• 總班次：${stats.totalShifts} 個\n`;
+                    report += `• 假日：${stats.holidays} 天\n`;
+                    report += `• 週末：${stats.weekends} 天\n\n`;
+
+                    if (conflictCount === 0) {
+                        report += `✅ 太棒了！未發現任何排班衝突。\n\n`;
+                        report += `🎯 排班系統功能檢查：\n`;
+                        report += `• 平日三班制 (週一至五)\n`;
+                        report += `• 週末兩班制 (週六、日)\n`;
+                        report += `• 假日兩班制功能\n`;
+                        report += `• 員工可用性管理\n`;
+                        report += `• 排班條件規則\n`;
+                        showNotification('驗證通過！', 'success');
+                    } else {
+                        report += `⚠️ 發現 ${conflictCount} 個排班衝突：\n\n`;
+                        conflicts.slice(0, 10).forEach((conflict, index) => {
+                            report += `${index + 1}. ${conflict}\n`;
+                        });
+                        if (conflictCount > 10) {
+                            report += `... 及其他 ${conflictCount - 10} 個衝突`;
+                        }
+                        showNotification(`發現 ${conflictCount} 個衝突`, 'warning');
+                    }
+
+                    alert(report);
+                });
+
+                generateReportBtn.addEventListener('click', () => {
+                    const year = currentDate.getFullYear();
+                    const month = currentDate.getMonth();
+                    const monthName = new Date(year, month).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long' });
+                    
+                    let report = `📈 ${monthName} 排班統計報表\n\n`;
+                    
+                    const employeeStats = {};
+                    employees.forEach(emp => {
+                        employeeStats[emp] = {
+                            total: 0,
+                            day: 0,
+                            evening: 0,
+                            night: 0,
+                            weekendDay: 0,
+                            weekendNight: 0,
+                            off: 0
+                        };
+                    });
+
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    let totalWorkingDays = 0;
+                    let totalShifts = 0;
+                    
+                    for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = formatDate(new Date(year, month, day));
+                        const shifts = scheduleData[dateStr] || [];
+                        
+                        if (shifts.length > 0) {
+                            totalWorkingDays++;
+                            totalShifts += shifts.length;
+                        }
+                        
+                        shifts.forEach(shift => {
+                            if (employeeStats[shift.employee]) {
+                                employeeStats[shift.employee].total++;
+                                if (shift.shift === 'day') employeeStats[shift.employee].day++;
+                                else if (shift.shift === 'evening') employeeStats[shift.employee].evening++;
+                                else if (shift.shift === 'night') employeeStats[shift.employee].night++;
+                                else if (shift.shift === 'weekend-day') employeeStats[shift.employee].weekendDay++;
+                                else if (shift.shift === 'weekend-night') employeeStats[shift.employee].weekendNight++;
+                                else if (shift.shift === 'off') employeeStats[shift.employee].off++;
+                            }
+                        });
+                    }
+
+                    report += `📊 總覽：\n`;
+                    report += `• 工作日：${totalWorkingDays} 天\n`;
+                    report += `• 總班次：${totalShifts} 個\n`;
+                    report += `• 平均每日班次：${(totalShifts / Math.max(totalWorkingDays, 1)).toFixed(1)} 個\n\n`;
+
+                    report += `👥 員工班次分布：\n`;
+                    employees.forEach(emp => {
+                        const stat = employeeStats[emp];
+                        report += `• ${emp}：總計 ${stat.total} 班\n`;
+                        report += `  平日：白班${stat.day} 小夜${stat.evening} 大夜${stat.night}\n`;
+                        report += `  週末/假日：白班${stat.weekendDay} 夜班${stat.weekendNight}\n`;
+                        if (stat.off > 0) report += `  休假：${stat.off} 天\n`;
+                        report += `\n`;
+                    });
+
+                    alert(report);
+                    showNotification('報表已生成', 'success');
+                });
+
+                // 資料管理
+                exportDataBtn.addEventListener('click', () => {
+                    const dataStr = JSON.stringify({ 
+                        employees, 
+                        scheduleData, 
+                        employeeAvailability,
+                        holidayDates,
+                        schedulingConditions,
+                        version: 'v2',
+                        exportDate: new Date().toISOString()
+                    }, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `排班資料_修訂版_${new Date().toISOString().slice(0, 10)}.json`;
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                    showNotification('資料已匯出', 'success');
+                });
+                
+                importDataInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    if (confirm('匯入資料將會覆蓋目前的排班表、條件、可用性設定與假日設定，確定要繼續嗎？')) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            try {
+                                const data = JSON.parse(event.target.result);
+                                if (data.employees && data.scheduleData) {
+                                    employees = data.employees;
+                                    scheduleData = data.scheduleData;
+                                    employeeAvailability = data.employeeAvailability || {};
+                                    holidayDates = data.holidayDates || {};
+                                    schedulingConditions = data.schedulingConditions || { employeeRules: [], shiftRules: [] };
+                                    saveData();
+                                    renderAll();
+                                    showNotification('✅ 資料匯入成功！', 'success');
+                                } else {
+                                    showNotification('❌ 檔案格式不正確！', 'error');
+                                }
+                            } catch (error) {
+                                showNotification('❌ 讀取檔案失敗。', 'error');
+                            }
+                        };
+                        reader.readAsText(file);
+                    }
+                    e.target.value = '';
+                });
+                
+                console.log('排班條件事件監聽器設定完成');
+            };
+
+            // 渲染所有內容
             const renderAll = () => {
                 renderCalendar();
                 renderEmployees();
                 populateAvailabilitySelectors();
+                populateHolidaySelectors();
                 lucide.createIcons();
             };
 
+            // 初始化流程
+            console.log('載入資料...');
             loadData();
+            
+            console.log('設定事件監聽器...');
+            setupEventListeners();
+            
+            console.log('渲染初始內容...');
             renderAll();
+            
+            console.log('修訂版排班系統初始化完成！');
+            showNotification('排班系統載入完成 - 排班條件功能已啟用', 'success', 4000);
         };
 
-        waitForLucide();
+        // 等待 Lucide 圖標庫載入完成
+        const waitForLucide = () => {
+            if (typeof lucide !== 'undefined') {
+                initializeApp();
+            } else {
+                setTimeout(waitForLucide, 100);
+            }
+        };
+
+        // 啟動應用
+        document.addEventListener('DOMContentLoaded', waitForLucide);
     </script>
 </body>
 </html>
